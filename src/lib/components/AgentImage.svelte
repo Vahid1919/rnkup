@@ -1,46 +1,44 @@
 <script lang="ts">
   import { agentImageUrl, type AgentName } from '$lib/agents';
 
-  let { agentName = 'Neon' }: { agentName?: AgentName } = $props();
+  type Props = {
+    agentName?: AgentName;
+    /** Decorative artwork is hidden from assistive technology. */
+    decorative?: boolean;
+  };
+
+  let { agentName = 'Neon', decorative = false }: Props = $props();
   const url = $derived(agentImageUrl(agentName));
 </script>
 
 <div class="agent-image">
-  <img src={url} alt={agentName} draggable="false" />
+  <img
+    src={url}
+    alt={decorative ? '' : `${agentName} agent artwork`}
+    draggable="false"
+  />
 </div>
-<div class="agent-fade" aria-hidden="true"></div>
 
 <style>
   .agent-image {
-    display: flex;
+    width: 100%;
     height: 100%;
-    align-items: end;
-    justify-content: center;
-    scale: 1.8;
+    pointer-events: none;
     user-select: none;
   }
 
+  /*
+   * The artwork files have wide transparent margins around a centred figure,
+   * so the image is scaled up from the bottom to fill its frame.
+   */
   img {
-    pointer-events: none;
+    width: 100%;
     height: 100%;
-    max-height: 100%;
-    user-select: none;
     object-fit: contain;
-    object-position: bottom;
+    object-position: center bottom;
+    transform: scale(var(--agent-scale, 1.45));
+    transform-origin: center bottom;
+    filter: drop-shadow(0 1.5rem 2.5rem var(--val-shadow));
     -webkit-user-drag: none;
-  }
-
-  .agent-fade {
-    position: absolute;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    height: 40%;
-    pointer-events: none;
-    background: linear-gradient(
-      to top,
-      var(--valorant-bg) 40%,
-      transparent 100%
-    );
   }
 </style>
