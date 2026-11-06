@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import {
   fetchPlayerProfile,
+  lookupErrorStatus,
   PlayerLookupError,
 } from '$lib/server/valorant/henrik-client';
 import type { RequestHandler } from './$types';
@@ -11,13 +12,10 @@ export const GET: RequestHandler = async ({ params }) => {
     return json({ data: profile });
   } catch (error) {
     if (error instanceof PlayerLookupError) {
-      const status =
-        error.kind === 'invalid-input'
-          ? 400
-          : error.kind === 'not-found'
-            ? 404
-            : 502;
-      return json({ error: error.message }, { status });
+      return json(
+        { error: error.message },
+        { status: lookupErrorStatus(error.kind) },
+      );
     }
 
     return json(

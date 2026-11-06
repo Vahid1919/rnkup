@@ -1,386 +1,80 @@
+/**
+ * The only module that talks to HenrikDev. Routes call the exported
+ * `fetch*` functions; parsing, caching and errors live in sibling files.
+ *
+ * Every `fetch*` function accepts a `fetchFn` and `apiKey` so tests can pass
+ * fakes. Caches are only used with the real global `fetch`, so tests that pass
+ * a fake never see results cached by another test.
+ */
+
 import { env } from '$env/dynamic/private';
 import {
-  buildCompetitivePerformance,
+  buildPlayerDashboard,
+  type CareerMatchInput,
   type CompetitiveMatchInput,
   type PlayerDashboard,
-} from '$lib/player-dashboard';
+  type PlayerRating,
+  type RatingPoint,
+  summarizeMatchForPlayer,
+} from '$lib/dashboard';
+import {
+  buildLeaderboardPage,
+  LEADERBOARD_PAGE_SIZE,
+  type LeaderboardPage,
+  type LeaderboardQuery,
+} from '$lib/leaderboard';
+import { buildMatchDetail, type MatchDetail } from '$lib/match-detail';
 import type { PlayerProfile } from '$lib/player-profile';
+import {
+  dashboardCache,
+  leaderboardCache,
+  leaderboardCacheKey,
+  matchCache,
+  playerCacheKey,
+  profileCache,
+  readTimedCache,
+  rememberMatch,
+  writeTimedCache,
+} from './cache';
+import { PlayerLookupError } from './errors';
+import {
+  isNonEmptyString,
+  isRecord,
+  optionalRecord,
+  parseAccountResponse,
+  parseLeaderboard,
+  parseMatch,
+  parseMatchPage,
+  parseRating,
+  parseRatingPoint,
+  parseStoredMatch,
+  requiredRecord,
+  validateRiotIdPart,
+} from './parse';
+
+export {
+  lookupErrorStatus,
+  PlayerLookupError,
+  type PlayerLookupErrorKind,
+} from './errors';
 
 const HENRIK_API_URL = 'https://api.henrikdev.xyz';
-const COMPETITIVE_MATCH_PAGE_SIZE = 20;
+
+/** The provider returns at most ten detailed matches per request. */
+const COMPETITIVE_MATCH_PAGE_SIZE = 10;
+
 const COMPETITIVE_MATCH_LIMIT = 100;
-const DASHBOARD_CACHE_DURATION_MS = 15 * 60 * 1000;
 
-type CompetitiveMatchPage = {
-  matches: CompetitiveMatchInput[];
-  returnedMatchCount: number;
-};
+const STORED_MATCH_LIMIT = 500;
 
-type DashboardCacheEntry = {
-  dashboard: PlayerDashboard;
-  expiresAt: number;
-};
+const RATING_HISTORY_LIMIT = 500;
 
-const dashboardCache = new Map<string, DashboardCacheEntry>();
+const MATCH_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-type HenrikAccountResponse = {
-  data: {
-    puuid: string;
-    region: string;
-    account_level: number;
-    name: string;
-    tag: string;
-    card: {
-      id: string;
-      small: string;
-      large: string;
-      wide: string;
-    };
-    last_update: string;
-  };
-  status: number;
-};
+const REGION_PATTERN = /^[a-z]{2,5}$/i;
 
-export class PlayerLookupError extends Error {
-  constructor(
-    public readonly kind: 'invalid-input' | 'not-found' | 'upstream',
-    message: string,
-  ) {
-    super(message);
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0;
-}
-
-function isNonNegativeSafeInteger(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
-}
-
-function parseAccountResponse(value: unknown): HenrikAccountResponse {
-  if (
-    !isRecord(value) ||
-    typeof value.status !== 'number' ||
-    !isRecord(value.data)
-  ) {
-    throw new PlayerLookupError(
-      'upstream',
-      'HenrikDev returned an unexpected account response.',
-    );
-  }
-
-  const { data } = value;
-  if (
-    !isNonEmptyString(data.puuid) ||
-    !isNonEmptyString(data.region) ||
-    !isNonNegativeSafeInteger(data.account_level) ||
-    !isNonEmptyString(data.name) ||
-    !isNonEmptyString(data.tag) ||
-    !isNonEmptyString(data.last_update) ||
-    !isRecord(data.card) ||
-    !isNonEmptyString(data.card.id) ||
-    !isNonEmptyString(data.card.small) ||
-    !isNonEmptyString(data.card.large) ||
-    !isNonEmptyString(data.card.wide)
-  ) {
-    throw new PlayerLookupError(
-      'upstream',
-      'HenrikDev returned incomplete account data.',
-    );
-  }
-
-  return value as HenrikAccountResponse;
-}
-
-function validateRiotIdPart(value: string, label: string): string {
-  const normalized = value.trim();
-  if (normalized.length === 0 || normalized.length > 32) {
-    throw new PlayerLookupError(
-      'invalid-input',
-      `${label} must contain between 1 and 32 characters.`,
-    );
-  }
-
-  return normalized;
-}
-
-function requiredRecord(
-  value: unknown,
-  message: string,
-): Record<string, unknown> {
-  if (!isRecord(value)) {
-    throw new PlayerLookupError('upstream', message);
-  }
-
-  return value;
-}
-
-function requiredString(
-  record: Record<string, unknown>,
-  key: string,
-  message: string,
-): string {
-  if (!isNonEmptyString(record[key])) {
-    throw new PlayerLookupError('upstream', message);
-  }
-
-  return record[key];
-}
-
-function requiredNonNegativeInteger(
-  record: Record<string, unknown>,
-  key: string,
-  message: string,
-): number {
-  if (!isNonNegativeSafeInteger(record[key])) {
-    throw new PlayerLookupError('upstream', message);
-  }
-
-  return record[key];
-}
-
-function optionalNonNegativeInteger(
-  record: Record<string, unknown>,
-  key: string,
-  message: string,
-): number | null {
-  const value = record[key];
-  if (value === undefined || value === null) {
-    return null;
-  }
-
-  if (!isNonNegativeSafeInteger(value)) {
-    throw new PlayerLookupError('upstream', message);
-  }
-
-  return value;
-}
-
-function parseCompetitiveMatch(
-  value: unknown,
-  playerPuuid: string,
-): CompetitiveMatchInput | null {
-  const match = requiredRecord(value, 'HenrikDev returned an invalid match.');
-  const metadata = requiredRecord(
-    match.metadata,
-    'HenrikDev returned match metadata in an unexpected format.',
-  );
-  const map = requiredRecord(
-    metadata.map,
-    'HenrikDev returned a match without a map.',
-  );
-  const players = match.players;
-  const teams = match.teams;
-
-  if (!Array.isArray(players) || !Array.isArray(teams)) {
-    throw new PlayerLookupError(
-      'upstream',
-      'HenrikDev returned a match without player or team data.',
-    );
-  }
-
-  const player = players.find(
-    (candidate) => isRecord(candidate) && candidate.puuid === playerPuuid,
-  );
-  if (!player) {
-    return null;
-  }
-
-  const teamId = requiredString(
-    player,
-    'team_id',
-    'HenrikDev returned a player without a team.',
-  );
-  const team = teams.find(
-    (candidate) => isRecord(candidate) && candidate.team_id === teamId,
-  );
-  if (!team) {
-    throw new PlayerLookupError(
-      'upstream',
-      'HenrikDev returned a match without the player team.',
-    );
-  }
-
-  const stats = requiredRecord(
-    player.stats,
-    'HenrikDev returned a player without match statistics.',
-  );
-  const agent = requiredRecord(
-    player.agent,
-    'HenrikDev returned a player without an agent.',
-  );
-  const rounds = requiredRecord(
-    team.rounds,
-    'HenrikDev returned a team without round totals.',
-  );
-  const damage = requiredRecord(
-    stats.damage,
-    'HenrikDev returned a player without damage statistics.',
-  );
-  const roundsWon = requiredNonNegativeInteger(
-    rounds,
-    'won',
-    'HenrikDev returned an invalid score.',
-  );
-  const roundsLost = requiredNonNegativeInteger(
-    rounds,
-    'lost',
-    'HenrikDev returned an invalid score.',
-  );
-  const hitCount =
-    requiredNonNegativeInteger(
-      stats,
-      'headshots',
-      'HenrikDev returned invalid hit statistics.',
-    ) +
-    requiredNonNegativeInteger(
-      stats,
-      'bodyshots',
-      'HenrikDev returned invalid hit statistics.',
-    ) +
-    requiredNonNegativeInteger(
-      stats,
-      'legshots',
-      'HenrikDev returned invalid hit statistics.',
-    );
-  const roundsPlayed = roundsWon + roundsLost;
-  const teamWon = team.won;
-
-  if (typeof teamWon !== 'boolean') {
-    throw new PlayerLookupError(
-      'upstream',
-      'HenrikDev returned an invalid match outcome.',
-    );
-  }
-
-  return {
-    id: requiredString(
-      metadata,
-      'match_id',
-      'HenrikDev returned a match without an ID.',
-    ),
-    startedAt: requiredString(
-      metadata,
-      'started_at',
-      'HenrikDev returned a match without a start time.',
-    ),
-    mapName: requiredString(
-      map,
-      'name',
-      'HenrikDev returned a match without a map name.',
-    ),
-    agentName: requiredString(
-      agent,
-      'name',
-      'HenrikDev returned a player without an agent name.',
-    ),
-    outcome: roundsWon === roundsLost ? 'draw' : teamWon ? 'win' : 'loss',
-    score: { won: roundsWon, lost: roundsLost },
-    stats: {
-      kills: requiredNonNegativeInteger(
-        stats,
-        'kills',
-        'HenrikDev returned invalid kill statistics.',
-      ),
-      deaths: requiredNonNegativeInteger(
-        stats,
-        'deaths',
-        'HenrikDev returned invalid death statistics.',
-      ),
-      assists: requiredNonNegativeInteger(
-        stats,
-        'assists',
-        'HenrikDev returned invalid assist statistics.',
-      ),
-      averageCombatScore:
-        roundsPlayed === 0
-          ? 0
-          : Math.round(
-            requiredNonNegativeInteger(
-              stats,
-              'score',
-              'HenrikDev returned invalid score statistics.',
-            ) / roundsPlayed,
-          ),
-      averageDamagePerRound:
-        roundsPlayed === 0
-          ? 0
-          : Math.round(
-            requiredNonNegativeInteger(
-              damage,
-              'dealt',
-              'HenrikDev returned invalid damage statistics.',
-            ) / roundsPlayed,
-          ),
-      headshots: requiredNonNegativeInteger(
-        stats,
-        'headshots',
-        'HenrikDev returned invalid hit statistics.',
-      ),
-      totalHits: hitCount,
-      headshotPercentage:
-        hitCount === 0
-          ? 0
-          : Math.round(
-            (requiredNonNegativeInteger(
-              stats,
-              'headshots',
-              'HenrikDev returned invalid hit statistics.',
-            ) /
-              hitCount) *
-            1000,
-          ) / 10,
-      firstBloods: optionalNonNegativeInteger(
-        stats,
-        'first_bloods',
-        'HenrikDev returned invalid first-blood statistics.',
-      ),
-    },
-  };
-}
-
-function parseCompetitiveMatches(
-  value: unknown,
-  playerPuuid: string,
-): CompetitiveMatchPage {
-  const response = requiredRecord(
-    value,
-    'HenrikDev returned an unexpected match response.',
-  );
-  if (!Array.isArray(response.data)) {
-    throw new PlayerLookupError(
-      'upstream',
-      'HenrikDev returned match data in an unexpected format.',
-    );
-  }
-
-  return {
-    returnedMatchCount: response.data.length,
-    matches: response.data.flatMap((match) => {
-      try {
-        const parsedMatch = parseCompetitiveMatch(match, playerPuuid);
-        return parsedMatch ? [parsedMatch] : [];
-      } catch {
-        return [];
-      }
-    }),
-  };
-}
-
-export async function fetchPlayerProfile(
-  name: string,
-  tag: string,
-  fetchFn: typeof fetch = fetch,
-  apiKey: string | undefined = env.VALORANT_API_KEY,
-): Promise<PlayerProfile> {
-  const validatedName = validateRiotIdPart(name, 'Riot ID name');
-  const validatedTag = validateRiotIdPart(tag, 'Riot ID tag');
-
+function requireApiKey(apiKey: string | undefined): string {
   if (!isNonEmptyString(apiKey)) {
     throw new PlayerLookupError(
       'upstream',
@@ -388,11 +82,17 @@ export async function fetchPlayerProfile(
     );
   }
 
-  const url = new URL(
-    `/valorant/v1/account/${encodeURIComponent(validatedName)}/${encodeURIComponent(validatedTag)}`,
-    HENRIK_API_URL,
-  );
+  return apiKey;
+}
 
+type HenrikResult = { found: true; body: unknown } | { found: false };
+
+async function requestHenrik(
+  url: URL,
+  fetchFn: typeof fetch,
+  apiKey: string,
+  failureMessage: string,
+): Promise<HenrikResult> {
   let response: Response;
   try {
     response = await fetchFn(url, {
@@ -403,28 +103,63 @@ export async function fetchPlayerProfile(
   }
 
   if (response.status === 404) {
+    return { found: false };
+  }
+
+  if (response.status === 429) {
+    throw new PlayerLookupError(
+      'rate-limited',
+      'HenrikDev is limiting lookups right now. Try again in a minute.',
+    );
+  }
+
+  if (!response.ok) {
+    throw new PlayerLookupError('upstream', failureMessage);
+  }
+
+  try {
+    return { found: true, body: await response.json() };
+  } catch {
+    throw new PlayerLookupError('upstream', 'HenrikDev returned invalid JSON.');
+  }
+}
+
+export async function fetchPlayerProfile(
+  name: string,
+  tag: string,
+  fetchFn: typeof fetch = fetch,
+  apiKey: string | undefined = env.VALORANT_API_KEY,
+): Promise<PlayerProfile> {
+  const validatedName = validateRiotIdPart(name, 'Riot ID name');
+  const validatedTag = validateRiotIdPart(tag, 'Riot ID tag');
+  const key = requireApiKey(apiKey);
+
+  const canUseCache = fetchFn === fetch;
+  const cacheKey = playerCacheKey(validatedName, validatedTag);
+  const cachedProfile = canUseCache
+    ? readTimedCache(profileCache, cacheKey)
+    : null;
+  if (cachedProfile) return cachedProfile;
+
+  const url = new URL(
+    `/valorant/v1/account/${encodeURIComponent(validatedName)}/${encodeURIComponent(validatedTag)}`,
+    HENRIK_API_URL,
+  );
+  const result = await requestHenrik(
+    url,
+    fetchFn,
+    key,
+    'HenrikDev could not retrieve the account.',
+  );
+  if (!result.found) {
     throw new PlayerLookupError(
       'not-found',
       'No Valorant account matches that Riot ID.',
     );
   }
 
-  if (!response.ok) {
-    throw new PlayerLookupError(
-      'upstream',
-      'HenrikDev could not retrieve the account.',
-    );
-  }
-
-  let body: unknown;
-  try {
-    body = await response.json();
-  } catch {
-    throw new PlayerLookupError('upstream', 'HenrikDev returned invalid JSON.');
-  }
-
-  const account = parseAccountResponse(body);
-  return {
+  const account = parseAccountResponse(result.body);
+  const profile: PlayerProfile = {
     puuid: account.data.puuid,
     riotId: {
       name: account.data.name,
@@ -435,6 +170,67 @@ export async function fetchPlayerProfile(
     card: account.data.card,
     lastUpdatedAt: account.data.last_update,
   };
+
+  if (canUseCache) writeTimedCache(profileCache, cacheKey, profile);
+  return profile;
+}
+
+function playerPath(profile: PlayerProfile): string {
+  return `${encodeURIComponent(profile.riotId.name)}/${encodeURIComponent(profile.riotId.tag)}`;
+}
+
+type DetailedHistory = {
+  matches: MatchDetail[];
+  /** False when a later page failed and only part of the history loaded. */
+  complete: boolean;
+};
+
+async function fetchDetailedHistory(
+  profile: PlayerProfile,
+  fetchFn: typeof fetch,
+  apiKey: string,
+): Promise<DetailedHistory> {
+  const matches = new Map<string, MatchDetail>();
+
+  for (let start = 0; start < COMPETITIVE_MATCH_LIMIT; ) {
+    const url = new URL(
+      `/valorant/v4/matches/${encodeURIComponent(profile.region.toLowerCase())}/pc/${playerPath(profile)}`,
+      HENRIK_API_URL,
+    );
+    url.searchParams.set('mode', 'competitive');
+    url.searchParams.set('size', String(COMPETITIVE_MATCH_PAGE_SIZE));
+    url.searchParams.set('start', String(start));
+
+    let result: HenrikResult;
+    try {
+      result = await requestHenrik(
+        url,
+        fetchFn,
+        apiKey,
+        'HenrikDev could not retrieve competitive matches.',
+      );
+    } catch (error) {
+      // Keep what already loaded rather than failing the whole dashboard.
+      if (matches.size > 0) {
+        return { matches: [...matches.values()], complete: false };
+      }
+      throw error;
+    }
+
+    if (!result.found) break;
+
+    const page = parseMatchPage(result.body);
+    for (const match of page.matches) {
+      if (matches.size < COMPETITIVE_MATCH_LIMIT) {
+        matches.set(match.id, match);
+      }
+    }
+    if (page.returnedMatchCount === 0) break;
+
+    start += page.returnedMatchCount;
+  }
+
+  return { matches: [...matches.values()], complete: true };
 }
 
 export async function fetchCompetitiveMatches(
@@ -442,67 +238,114 @@ export async function fetchCompetitiveMatches(
   fetchFn: typeof fetch = fetch,
   apiKey: string | undefined = env.VALORANT_API_KEY,
 ): Promise<CompetitiveMatchInput[]> {
-  if (!isNonEmptyString(apiKey)) {
-    throw new PlayerLookupError(
-      'upstream',
-      'HenrikDev API access is not configured.',
-    );
+  const history = await fetchDetailedHistory(
+    profile,
+    fetchFn,
+    requireApiKey(apiKey),
+  );
+  return history.matches.flatMap((match) => {
+    const summary = summarizeMatchForPlayer(match, profile.puuid);
+    return summary ? [summary] : [];
+  });
+}
+
+async function fetchStoredMatches(
+  profile: PlayerProfile,
+  fetchFn: typeof fetch,
+  apiKey: string,
+): Promise<CareerMatchInput[]> {
+  const url = new URL(
+    `/valorant/v1/stored-matches/${encodeURIComponent(profile.region.toLowerCase())}/${playerPath(profile)}`,
+    HENRIK_API_URL,
+  );
+  url.searchParams.set('mode', 'competitive');
+  url.searchParams.set('size', String(STORED_MATCH_LIMIT));
+
+  const result = await requestHenrik(
+    url,
+    fetchFn,
+    apiKey,
+    'HenrikDev could not retrieve stored matches.',
+  );
+  if (!result.found || !isRecord(result.body)) return [];
+
+  const { data } = result.body;
+  return Array.isArray(data)
+    ? data.flatMap((match) => {
+        const parsed = parseStoredMatch(match);
+        return parsed ? [parsed] : [];
+      })
+    : [];
+}
+
+async function fetchRating(
+  profile: PlayerProfile,
+  fetchFn: typeof fetch,
+  apiKey: string,
+): Promise<PlayerRating | null> {
+  const url = new URL(
+    `/valorant/v3/mmr/${encodeURIComponent(profile.region.toLowerCase())}/pc/${playerPath(profile)}`,
+    HENRIK_API_URL,
+  );
+  const result = await requestHenrik(
+    url,
+    fetchFn,
+    apiKey,
+    'HenrikDev could not retrieve the rating.',
+  );
+  return result.found ? parseRating(result.body) : null;
+}
+
+/** Combines the live rating history with the provider's longer stored one. */
+async function fetchRatingHistory(
+  profile: PlayerProfile,
+  fetchFn: typeof fetch,
+  apiKey: string,
+): Promise<RatingPoint[]> {
+  const region = encodeURIComponent(profile.region.toLowerCase());
+  const recentUrl = new URL(
+    `/valorant/v2/mmr-history/${region}/pc/${playerPath(profile)}`,
+    HENRIK_API_URL,
+  );
+  const storedUrl = new URL(
+    `/valorant/v2/stored-mmr-history/${region}/pc/${playerPath(profile)}`,
+    HENRIK_API_URL,
+  );
+  storedUrl.searchParams.set('size', String(RATING_HISTORY_LIMIT));
+
+  const failureMessage = 'HenrikDev could not retrieve the rating history.';
+  const [recent, stored] = await Promise.all([
+    requestHenrik(recentUrl, fetchFn, apiKey, failureMessage).catch(
+      (): HenrikResult => ({ found: false }),
+    ),
+    requestHenrik(storedUrl, fetchFn, apiKey, failureMessage).catch(
+      (): HenrikResult => ({ found: false }),
+    ),
+  ]);
+
+  const points = new Map<string, RatingPoint>();
+  const collect = (entries: unknown): void => {
+    if (!Array.isArray(entries)) return;
+    for (const entry of entries) {
+      const point = parseRatingPoint(entry);
+      if (point) points.set(point.matchId ?? point.date, point);
+    }
+  };
+
+  if (stored.found) collect(optionalRecord(stored.body)?.data);
+  if (recent.found) {
+    collect(optionalRecord(optionalRecord(recent.body)?.data)?.history);
   }
 
-  const matches: CompetitiveMatchInput[] = [];
+  return [...points.values()];
+}
 
-  for (let start = 0; start < COMPETITIVE_MATCH_LIMIT;) {
-    const url = new URL(
-      `/valorant/v4/matches/${encodeURIComponent(profile.region.toLowerCase())}/pc/${encodeURIComponent(profile.riotId.name)}/${encodeURIComponent(profile.riotId.tag)}`,
-      HENRIK_API_URL,
-    );
-    url.searchParams.set('mode', 'competitive');
-    url.searchParams.set('size', String(COMPETITIVE_MATCH_PAGE_SIZE));
-    url.searchParams.set('start', String(start));
-
-    let response: Response;
-    try {
-      response = await fetchFn(url, {
-        headers: { Authorization: apiKey },
-      });
-    } catch {
-      throw new PlayerLookupError(
-        'upstream',
-        'HenrikDev could not retrieve competitive matches.',
-      );
-    }
-
-    if (response.status === 404) {
-      return matches;
-    }
-
-    if (!response.ok) {
-      throw new PlayerLookupError(
-        'upstream',
-        'HenrikDev could not retrieve competitive matches.',
-      );
-    }
-
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      throw new PlayerLookupError(
-        'upstream',
-        'HenrikDev returned invalid JSON.',
-      );
-    }
-
-    const page = parseCompetitiveMatches(body, profile.puuid);
-    matches.push(...page.matches);
-    if (page.returnedMatchCount === 0) {
-      return matches;
-    }
-
-    start += page.returnedMatchCount;
-  }
-
-  return matches;
+/** The cached dashboard for a player, without triggering a provider lookup. */
+export function getCachedPlayerDashboard(
+  name: string,
+  tag: string,
+): PlayerDashboard | null {
+  return readTimedCache(dashboardCache, playerCacheKey(name, tag));
 }
 
 export async function fetchPlayerDashboard(
@@ -511,34 +354,161 @@ export async function fetchPlayerDashboard(
   fetchFn: typeof fetch = fetch,
   apiKey: string | undefined = env.VALORANT_API_KEY,
 ): Promise<PlayerDashboard> {
-  const cacheKey = `${name.trim().toLocaleLowerCase()}#${tag.trim().toLocaleLowerCase()}`;
+  const cacheKey = playerCacheKey(name, tag);
   const canUseCache = fetchFn === fetch;
   const cachedDashboard = canUseCache
-    ? dashboardCache.get(cacheKey)
-    : undefined;
-
-  if (cachedDashboard && cachedDashboard.expiresAt > Date.now()) {
-    return cachedDashboard.dashboard;
-  }
-
-  if (cachedDashboard) {
-    dashboardCache.delete(cacheKey);
-  }
+    ? readTimedCache(dashboardCache, cacheKey)
+    : null;
+  if (cachedDashboard) return cachedDashboard;
 
   const profile = await fetchPlayerProfile(name, tag, fetchFn, apiKey);
-  const matchInputs = await fetchCompetitiveMatches(profile, fetchFn, apiKey);
-  const performance = buildCompetitivePerformance(matchInputs);
-  const dashboard = {
+  const key = requireApiKey(apiKey);
+
+  // Recent detailed matches are required. The longer history and the rating
+  // enrich the dashboard, so a failure there leaves those sections empty.
+  const [history, careerMatches, rating, ratingHistory] = await Promise.all([
+    fetchDetailedHistory(profile, fetchFn, key),
+    fetchStoredMatches(profile, fetchFn, key).catch(
+      (): CareerMatchInput[] => [],
+    ),
+    fetchRating(profile, fetchFn, key).catch((): null => null),
+    fetchRatingHistory(profile, fetchFn, key).catch((): RatingPoint[] => []),
+  ]);
+
+  const dashboard = buildPlayerDashboard({
     profile,
-    ...performance,
-  };
+    matches: history.matches.flatMap((match) => {
+      const summary = summarizeMatchForPlayer(match, profile.puuid);
+      return summary ? [summary] : [];
+    }),
+    careerMatches,
+    rating,
+    ratingHistory,
+  });
 
   if (canUseCache) {
-    dashboardCache.set(cacheKey, {
-      dashboard,
-      expiresAt: Date.now() + DASHBOARD_CACHE_DURATION_MS,
-    });
+    for (const match of history.matches) rememberMatch(match);
+    if (history.complete) {
+      writeTimedCache(dashboardCache, cacheKey, dashboard);
+    }
   }
 
   return dashboard;
+}
+
+export async function fetchMatchDetail(
+  region: string,
+  matchId: string,
+  fetchFn: typeof fetch = fetch,
+  apiKey: string | undefined = env.VALORANT_API_KEY,
+): Promise<MatchDetail> {
+  if (!MATCH_ID_PATTERN.test(matchId)) {
+    throw new PlayerLookupError('invalid-input', 'That match ID is not valid.');
+  }
+  if (!REGION_PATTERN.test(region)) {
+    throw new PlayerLookupError('invalid-input', 'That region is not valid.');
+  }
+
+  const normalizedId = matchId.toLowerCase();
+  const canUseCache = fetchFn === fetch;
+  const cachedMatch = canUseCache ? matchCache.get(normalizedId) : undefined;
+  if (cachedMatch) return cachedMatch;
+
+  const url = new URL(
+    `/valorant/v4/match/${encodeURIComponent(region.toLowerCase())}/${encodeURIComponent(normalizedId)}`,
+    HENRIK_API_URL,
+  );
+  const result = await requestHenrik(
+    url,
+    fetchFn,
+    requireApiKey(apiKey),
+    'HenrikDev could not retrieve the match.',
+  );
+  if (!result.found) {
+    throw new PlayerLookupError('not-found', 'That match could not be found.');
+  }
+
+  const body = requiredRecord(
+    result.body,
+    'HenrikDev returned an unexpected match response.',
+  );
+  const detail = buildMatchDetail(parseMatch(body.data));
+  if (canUseCache) rememberMatch(detail);
+  return detail;
+}
+
+/** Loads one match in the context of the player whose page it was opened from. */
+export async function fetchPlayerMatch(
+  name: string,
+  tag: string,
+  matchId: string,
+  fetchFn: typeof fetch = fetch,
+  apiKey: string | undefined = env.VALORANT_API_KEY,
+): Promise<{ profile: PlayerProfile; match: MatchDetail }> {
+  const profile = await fetchPlayerProfile(name, tag, fetchFn, apiKey);
+  const match = await fetchMatchDetail(
+    profile.region,
+    matchId,
+    fetchFn,
+    apiKey,
+  );
+
+  if (!match.players.some((player) => player.puuid === profile.puuid)) {
+    throw new PlayerLookupError(
+      'not-found',
+      'This player did not play in that match.',
+    );
+  }
+
+  return { profile, match };
+}
+
+/**
+ * One page of a region's PC leaderboard. Pages are always read at the full
+ * page size and filtered to Radiant afterwards, so both views share a cache.
+ */
+export async function fetchLeaderboard(
+  query: LeaderboardQuery,
+  fetchFn: typeof fetch = fetch,
+  apiKey: string | undefined = env.VALORANT_API_KEY,
+): Promise<LeaderboardPage> {
+  if (!REGION_PATTERN.test(query.region)) {
+    throw new PlayerLookupError('invalid-input', 'That region is not valid.');
+  }
+  if (!Number.isSafeInteger(query.page) || query.page < 1) {
+    throw new PlayerLookupError('invalid-input', 'That page is not valid.');
+  }
+
+  const key = requireApiKey(apiKey);
+  const canUseCache = fetchFn === fetch;
+  const cacheKey = leaderboardCacheKey(query.region, query.page);
+  const cachedSlice = canUseCache
+    ? readTimedCache(leaderboardCache, cacheKey)
+    : null;
+  if (cachedSlice) return buildLeaderboardPage(query, cachedSlice);
+
+  // HenrikDev's docs list `start_index`, but the API pages with a 1-based `page`.
+  const url = new URL(
+    `/valorant/v3/leaderboard/${encodeURIComponent(query.region)}/pc`,
+    HENRIK_API_URL,
+  );
+  url.searchParams.set('size', String(LEADERBOARD_PAGE_SIZE));
+  url.searchParams.set('page', String(query.page));
+
+  const result = await requestHenrik(
+    url,
+    fetchFn,
+    key,
+    'HenrikDev could not retrieve the leaderboard.',
+  );
+  if (!result.found) {
+    throw new PlayerLookupError(
+      'not-found',
+      'No leaderboard is available for that region.',
+    );
+  }
+
+  const slice = parseLeaderboard(result.body);
+  if (canUseCache) writeTimedCache(leaderboardCache, cacheKey, slice);
+  return buildLeaderboardPage(query, slice);
 }
