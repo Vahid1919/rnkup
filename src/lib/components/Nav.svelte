@@ -1,72 +1,151 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
+  import { page } from '$app/state';
   import NavButtonGroup from './NavButtonGroup.svelte';
+
+  const siteLinks = [
+    { route: '/', label: 'Home' },
+    { route: '/leaderboard', label: 'Leaderboard' },
+  ] as const;
 </script>
 
+<!-- The bar holds the site links; pages with sections add a second row. -->
 <header>
-  <a class="brand" href={resolve('/')} aria-label="Radiant Stats home">
-    <img src="/images/logo.png" alt="" draggable="false" />
-    <span>Radiant Stats</span>
-  </a>
+  <div class="bar">
+    <a class="brand" href={resolve('/')} aria-label="Radiant Stats home">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M8 2h22l-6 28H2z" />
+        <rect x="9" y="17" width="3.5" height="7" />
+        <rect x="14.25" y="12" width="3.5" height="12" />
+        <rect x="19.5" y="8" width="3.5" height="16" />
+      </svg>
+      <span class="word">Radiant Stats</span>
+    </a>
+    <nav aria-label="Site">
+      <ul>
+        {#each siteLinks as link (link.route)}
+          <li>
+            <a
+              class="site-link"
+              href={resolve(link.route)}
+              aria-current={page.route.id === link.route && !page.error
+                ? 'page'
+                : undefined}
+            >
+              {link.label}
+            </a>
+          </li>
+        {/each}
+      </ul>
+    </nav>
+  </div>
   <NavButtonGroup />
 </header>
 
 <style>
   header {
-    position: fixed;
+    position: sticky;
     z-index: 50;
     top: 0;
-    right: 0;
-    left: 0;
-    display: flex;
-    width: 100%;
-    align-items: center;
-    min-height: 4.5rem;
-    gap: 1rem;
-    padding: 0.625rem clamp(1rem, 4vw, 3rem);
-    border-bottom: 1px solid #2b2b32;
-    background: rgba(13, 13, 15, 0.92);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-    color: white;
-    font-family: 'Chakra Petch', sans-serif;
-    backdrop-filter: blur(6.9px);
-    -webkit-backdrop-filter: blur(6.9px);
+    border-bottom: 1px solid var(--val-line);
+    background: var(--val-bg-glass);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
   }
 
-  img {
-    height: 2.5rem;
-    user-select: none;
-    -webkit-user-drag: none;
+  .bar {
+    display: flex;
+    width: min(100%, 72rem);
+    height: var(--bar-height);
+    align-items: stretch;
+    gap: var(--space-6);
+    margin: 0 auto;
+    padding: 0 clamp(1.25rem, 4vw, 2.5rem);
   }
 
   .brand {
     display: flex;
+    flex-shrink: 0;
     align-items: center;
-    color: white;
-    gap: 0.5rem;
-    font-size: 1.25rem;
-    font-weight: 600;
-    letter-spacing: 0;
+    align-self: center;
+    gap: var(--space-2);
+    margin-left: calc(var(--space-1) * -1);
+    padding: var(--space-1);
+    color: var(--val-cream);
+    font-family: var(--font-display);
+    font-size: var(--text-md);
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    line-height: 1;
     text-decoration: none;
     text-transform: uppercase;
   }
 
-  .brand span {
+  ul {
+    display: flex;
+    height: 100%;
+    gap: var(--space-5);
     margin: 0;
+    padding: 0;
+    list-style: none;
   }
 
-  :global(nav) {
-    margin-left: auto;
+  /* Each link is as tall as the bar, so its underline sits on the bar's edge. */
+  .site-link {
+    position: relative;
+    display: flex;
+    height: 100%;
+    align-items: center;
+    color: var(--val-muted);
+    font-size: var(--text-md);
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    transition: color 150ms ease;
   }
 
-  @media (max-width: 700px) {
-    .brand {
-      font-size: 1rem;
+  .site-link::after {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    content: '';
+    background: var(--val-red);
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+
+  .site-link:hover,
+  .site-link[aria-current] {
+    color: var(--val-cream);
+  }
+
+  .site-link[aria-current]::after {
+    opacity: 1;
+  }
+
+  .mark {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+
+  .mark path {
+    fill: var(--val-red);
+  }
+
+  .mark rect {
+    fill: var(--val-cream);
+  }
+
+  /* The mark alone carries the brand on small screens; the links keep their labels. */
+  @media (max-width: 560px) {
+    .bar {
+      gap: var(--space-5);
     }
 
-    :global(nav) {
-      margin-left: 0;
-      overflow-x: auto;
+    .word {
+      display: none;
     }
   }
 </style>
