@@ -5,10 +5,13 @@
 
 <svelte:head>
   <title>Radiant Stats</title>
-  <meta name="description" content="Valorant performance analytics." />
+  <meta
+    name="description"
+    content="Your Valorant ranked stats and what to fix first."
+  />
 </svelte:head>
 
 <Nav />
-<main>
+<main id="main-content" tabindex="-1">
   <Hero />
 </main>

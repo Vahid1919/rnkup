@@ -2,7 +2,8 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import type { PlayerProfile } from '$lib/player-profile';
-  import LoadingOverlay from './LoadingOverlay.svelte';
+  import AgentImage from './AgentImage.svelte';
+  import LoadingBar from './LoadingBar.svelte';
 
   const defaultRiotId = 'Janhoi#VAL';
 
@@ -75,175 +76,275 @@
 </script>
 
 <section id="player-search" aria-labelledby="hero-title">
-  <div class="player">
+  <!-- Artwork fills the right of the hero, behind the text. -->
+  <div class="art" aria-hidden="true">
+    <div class="art-backdrop"></div>
+    <div class="art-figure">
+      <AgentImage agentName="Jett" decorative />
+    </div>
+  </div>
+
+  <div class="layout">
     <div class="content">
-      <p class="eyebrow">Valorant profile lookup</p>
-      <h1 id="hero-title">Find your next advantage.</h1>
-      <form onsubmit={searchPlayer}>
-        <div class="fields">
-          <label>
-            Riot ID
+      <p class="eyebrow">Valorant ranked stats</p>
+      <h1 id="hero-title">Fix your biggest <span>problems.</span></h1>
+      <p class="lede">
+        Type in a Riot ID. We go through your recent ranked games, compare you
+        with the other nine players in each lobby, and show what's costing you
+        rounds.
+      </p>
+
+      <form onsubmit={searchPlayer} novalidate>
+        <div class="search">
+          <label for="riot-id">Riot ID</label>
+          <div class="field-row">
             <input
+              id="riot-id"
               bind:value={riotId}
               name="riotId"
               placeholder={defaultRiotId}
-              autocomplete="username"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
               maxlength="32"
+              aria-invalid={errorMessage ? 'true' : undefined}
+              aria-describedby={errorMessage
+                ? 'riot-id-error riot-id-hint'
+                : 'riot-id-hint'}
             />
-          </label>
+            <button type="submit" disabled={isLoading} aria-busy={isLoading}>
+              Look up
+            </button>
+          </div>
+          {#if errorMessage}
+            <p id="riot-id-error" class="message error" role="alert">
+              {errorMessage}
+            </p>
+          {/if}
+          <p id="riot-id-hint" class="message">
+            NAME#TAG. Leave it blank to see an example.
+          </p>
         </div>
-        <button type="submit" disabled={isLoading}>
-          {isLoading ? 'Searching...' : 'Find player'}
-        </button>
       </form>
-
-      {#if errorMessage}
-        <p class="message error" role="alert">{errorMessage}</p>
-      {:else}
-        <p class="message">
-          Enter a Riot ID, or leave this blank and select Find player to explore
-          an example profile.
-        </p>
-      {/if}
     </div>
   </div>
 </section>
 
-{#if isLoading}
-  <LoadingOverlay label="Finding player..." />
-{/if}
+<LoadingBar active={isLoading} label="Loading player…" />
 
 <style>
   section {
     position: relative;
     display: flex;
-    width: 100%;
-    min-height: 100dvh;
+    align-items: center;
+    min-height: calc(100dvh - var(--header-height));
     overflow: hidden;
-    padding-top: 5rem;
   }
 
-  .player {
-    display: flex;
-    width: 100%;
-    align-items: center;
-    justify-content: center;
-    padding: 2rem;
+  .layout {
+    position: relative;
+    z-index: 1;
+    width: min(100%, 72rem);
+    margin: 0 auto;
+    padding: var(--space-7) clamp(1.25rem, 4vw, 2rem);
   }
 
   .content {
-    width: min(100%, 31rem);
+    max-width: 34rem;
   }
 
   .eyebrow {
-    margin: 0 0 0.75rem;
-    color: var(--valorant-red);
-    font-family: 'Chakra Petch', sans-serif;
-    font-size: 0.8rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    margin: 0 0 var(--space-4);
+    color: var(--val-faint);
+    font-size: var(--text-sm);
+    font-weight: 500;
   }
 
   h1 {
     margin: 0;
-    color: white;
-    font-family: 'Chakra Petch', sans-serif;
-    font-size: clamp(2.4rem, 4vw, 4rem);
-    line-height: 0.95;
-    letter-spacing: 0;
+    color: var(--val-cream);
+    font-family: var(--font-display);
+    font-size: var(--text-display-lg);
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    line-height: 0.98;
+    text-transform: uppercase;
+    text-wrap: balance;
+  }
+
+  /* The red word always gets a line to itself. */
+  h1 span {
+    display: block;
+    color: var(--val-red);
+  }
+
+  /* Beside the artwork there is room for the first line to run a little
+     wider than the text column, which keeps the headline to two lines. */
+  @media (min-width: 901px) {
+    h1 {
+      margin-right: calc(-1 * var(--space-8));
+    }
+  }
+
+  .lede {
+    max-width: 30rem;
+    margin: var(--space-5) 0 0;
+    color: var(--val-muted);
+    font-size: var(--text-lg);
+    line-height: 1.6;
+    text-wrap: pretty;
   }
 
   form {
-    display: grid;
-    gap: 1.25rem;
-    margin-top: 2rem;
-  }
-
-  .fields {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.75rem;
+    margin-top: var(--space-7);
   }
 
   label {
+    display: block;
+    margin-bottom: var(--space-2);
+    color: var(--val-cream);
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+
+  .field-row {
     display: grid;
-    gap: 0.45rem;
-    color: #b8b8c0;
-    font-family: 'Chakra Petch', sans-serif;
-    font-size: 0.8rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-2);
   }
 
   input {
     width: 100%;
-    min-height: 3.25rem;
-    border: 1px solid #44444d;
-    border-radius: 0;
-    padding: 0.75rem;
-    color: white;
-    background: #18181d;
+    min-height: 3rem;
+    border: 1px solid var(--val-line-strong);
+    border-radius: var(--radius);
+    padding: 0.625rem 0.875rem;
+    color: var(--val-cream);
+    background: var(--val-panel);
     font: inherit;
-    letter-spacing: 0;
-    text-transform: none;
+    font-size: var(--text-md);
+    transition: border-color 150ms ease;
   }
 
   input::placeholder {
-    color: #777781;
+    color: var(--val-faint);
+    opacity: 1;
   }
 
-  input:focus-visible,
-  button:focus-visible {
-    outline: 2px solid white;
-    outline-offset: 3px;
+  input:hover {
+    border-color: var(--val-faint);
   }
 
+  input[aria-invalid='true'] {
+    border-color: var(--val-loss);
+  }
+
+  /* Black text on red: 6.3:1, where white on red would fail AA. */
   button {
-    min-height: 3.25rem;
+    min-height: 3rem;
     border: 0;
-    border-radius: 0;
-    padding: 0.75rem 1.25rem;
-    color: white;
-    background: var(--valorant-red);
-    font-family: 'Chakra Petch', sans-serif;
-    font-size: 0.95rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    border-radius: var(--radius);
+    padding: 0.625rem 1.5rem;
+    color: var(--val-bg);
+    background: var(--val-red);
+    font: inherit;
+    font-size: var(--text-md);
+    font-weight: 600;
+    white-space: nowrap;
+    transition: background-color 150ms ease;
   }
 
   button:hover:not(:disabled) {
-    background: #ff6470;
+    background: var(--val-cream);
   }
 
   button:disabled {
     cursor: wait;
-    opacity: 0.65;
+    color: var(--val-cream);
+    background: var(--val-line-strong);
   }
 
   .message {
-    min-height: 1.5rem;
-    margin: 1rem 0 0;
-    color: #a8a8b0;
-    font-size: 0.95rem;
+    margin: var(--space-3) 0 0;
+    color: var(--val-faint);
+    font-size: var(--text-sm);
+    line-height: 1.5;
   }
 
   .error {
-    color: #ff8c95;
+    color: var(--val-loss);
+    font-weight: 600;
   }
 
-  @media (max-width: 700px) {
-    section {
-      min-height: 100dvh;
-      flex-direction: column;
-      padding-top: 8.75rem;
+  /* The artwork is a backdrop: as tall as the hero, anchored to the right
+     edge of the page width, and faded out towards the text. */
+  .art {
+    position: absolute;
+    right: max(0px, (100% - 72rem) / 2 - 6rem);
+    bottom: 0;
+    width: min(60%, 50rem);
+    height: 100%;
+    mask-image: linear-gradient(to right, transparent, #000 38%);
+  }
+
+  /* A slanted red band running the full height of the hero. */
+  .art-backdrop {
+    position: absolute;
+    inset: 0 6% 0 22%;
+    background: linear-gradient(
+      to bottom,
+      var(--val-red),
+      color-mix(in srgb, var(--val-red) 55%, var(--val-bg))
+    );
+    clip-path: polygon(26% 0, 100% 0, 74% 100%, 0 100%);
+  }
+
+  /* Sized from the hero's height, so the figure stands taller than the hero:
+     head near the top, legs running off the bottom. The artwork file is
+     2048 by 1860 with the figure in the middle of wide empty margins. */
+  .art-figure {
+    position: absolute;
+    top: -5%;
+    left: 50%;
+    height: 129%;
+    aspect-ratio: 2048 / 1860;
+    transform: translateX(-50%);
+    --agent-scale: 1;
+  }
+
+  @media (max-width: 900px) {
+    .layout {
+      padding-block: var(--space-7) var(--space-8);
     }
 
-    .player {
-      min-height: 25dvh;
-      padding: 2rem 1.5rem 3rem;
+    .content {
+      max-width: 30rem;
+    }
+
+    /* On tablets the artwork stays behind the text, pushed to the right edge
+       and dimmed so the headline and form remain readable over it. */
+    .art {
+      right: -8%;
+      width: 75%;
+      opacity: 0.7;
+      mask-image: linear-gradient(to right, transparent, #000 45%);
+    }
+  }
+
+  /* The form is the job on phones; the artwork steps aside. */
+  @media (max-width: 600px) {
+    .content {
+      max-width: none;
+    }
+
+    .art {
+      display: none;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .field-row {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>
