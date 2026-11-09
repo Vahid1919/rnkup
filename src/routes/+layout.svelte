@@ -1,9 +1,22 @@
 <script lang="ts">
   import { navigating } from '$app/state';
-  import LoadingOverlay from '$lib/components/LoadingOverlay.svelte';
+  import LoadingBar from '$lib/components/LoadingBar.svelte';
   import '../app.css';
 
   let { children } = $props();
+
+  const loadingLabel = $derived.by(() => {
+    const route = navigating.to?.route.id ?? '';
+    if (route.includes('/matches/')) return 'Loading match…';
+    if (route.startsWith('/players/')) return 'Loading player…';
+    if (route === '/leaderboard') return 'Loading leaderboard…';
+    return 'Loading…';
+  });
+
+  // The landing search shows its own bar while it validates the Riot ID.
+  const showLoading = $derived(
+    navigating.to !== null && navigating.from?.route.id !== '/',
+  );
 </script>
 
 <svelte:head>
@@ -14,13 +27,13 @@
     crossorigin="anonymous"
   />
   <link
-    href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&family=Google+Sans+Flex:opsz@6..144&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Oswald:wght@400;500;600;700&display=swap"
     rel="stylesheet"
   />
 </svelte:head>
 
-{#if navigating.to}
-  <LoadingOverlay label="Loading player dashboard..." />
-{/if}
+<a class="skip-link" href="#main-content">Skip to main content</a>
+
+<LoadingBar active={showLoading} label={loadingLabel} />
 
 {@render children()}
