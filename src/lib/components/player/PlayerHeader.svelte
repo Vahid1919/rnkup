@@ -1,46 +1,51 @@
-<!-- Player identity: card, Riot ID, current rank with RR and peak rank as one quiet line. -->
+<!-- Player identity: card and Riot ID, plus rank when the stats overview isn't there to show it. -->
 <script lang="ts">
-  import RankBadge from '$lib/components/RankBadge.svelte';
+  import RatingSummary from '$lib/components/player/RatingSummary.svelte';
   import type { PlayerRating } from '$lib/dashboard';
-  import { formatSeason } from '$lib/format';
   import type { PlayerProfile } from '$lib/player-profile';
 
   type Props = {
     profile: PlayerProfile;
     rating: PlayerRating | null;
+    /** Off when the stats overview already shows the rank. */
+    showRank?: boolean;
   };
 
-  let { profile, rating }: Props = $props();
+  let { profile, rating, showRank = true }: Props = $props();
 </script>
 
 <header id="profile" class="player-header">
-  <img class="avatar" src={profile.card.small} alt="" width="64" height="64" />
   <div class="identity">
+    <img
+      class="avatar"
+      src={profile.card.small}
+      alt=""
+      width="64"
+      height="64"
+    />
     <h1>
       {profile.riotId.name}<span class="tag">#{profile.riotId.tag}</span>
     </h1>
-    <p class="rank">
-      {#if rating?.current}
-        <RankBadge rank={rating.current.rank} />
-        <span class="rr">{rating.current.rr} RR</span>
-      {:else}
-        <span class="rr">Unranked</span>
-      {/if}
-    </p>
-    {#if rating?.peak}
-      <p class="peak">
-        Peak {rating.peak.rank.name}{rating.peak.seasonShort
-          ? `, ${formatSeason(rating.peak.seasonShort)}`
-          : ''}
-      </p>
-    {/if}
   </div>
+
+  {#if showRank && rating}
+    <RatingSummary {rating} />
+  {/if}
 </header>
 
 <style>
   .player-header {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
+    justify-content: space-between;
+    gap: var(--space-5) var(--space-6);
+  }
+
+  .identity {
+    display: flex;
+    align-items: center;
+    min-width: 0;
     gap: var(--space-5);
   }
 
@@ -52,17 +57,10 @@
     object-fit: cover;
   }
 
-  .identity {
-    display: grid;
-    min-width: 0;
-    gap: var(--space-1);
-  }
-
   h1 {
     margin: 0;
     color: var(--val-cream);
     font-family: var(--font-display);
-    margin-bottom: var(--space-1);
     font-size: var(--text-display-sm);
     font-weight: 600;
     letter-spacing: 0.01em;
@@ -76,27 +74,8 @@
     font-weight: 400;
   }
 
-  .rank {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-1) var(--space-3);
-    margin: 0;
-  }
-
-  .peak {
-    margin: 0;
-    color: var(--val-faint);
-    font-size: var(--text-sm);
-  }
-
-  .rr {
-    color: var(--val-muted);
-    font-variant-numeric: tabular-nums;
-  }
-
   @media (max-width: 560px) {
-    .player-header {
+    .identity {
       gap: var(--space-4);
     }
 

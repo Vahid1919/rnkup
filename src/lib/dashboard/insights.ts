@@ -1,4 +1,3 @@
-import type { AgentRole } from '../agents';
 import { RELIABLE_SAMPLE_MATCHES } from './breakdowns';
 import type {
   BreakdownRow,
@@ -14,8 +13,8 @@ import type {
 
 /**
  * Rule-based coaching. Every insight is derived from the player's own
- * matches: what the number is, why it matters for their results, and what to
- * change next game. Rules are deliberately conservative about sample size.
+ * matches: what the number is and why it matters for their results. Rules are
+ * deliberately conservative about sample size.
  */
 
 export type InsightFamily =
@@ -41,7 +40,8 @@ export type Insight = {
   why: string;
   /** How the player's own win rate moves with this stat, when measurable. */
   evidence: string | null;
-  actions: string[];
+  /** What to keep doing; strengths only. */
+  keep: string | null;
   priority: number;
 };
 
@@ -111,34 +111,6 @@ function priorityOf(base: number, severity: number, gap: number): number {
   return Math.round(base + clamp(severity) * 40 + Math.min(gap, 60) * 0.5);
 }
 
-const OPENING_ACTIONS: Record<AgentRole | 'default', string[]> = {
-  Duelist: [
-    'Stop dry peeking. Go in behind a flash, a smoke or your dash, every time.',
-    'Call your entry before you go, so a teammate is already set up to trade you.',
-    'On defense, take one early fight from an off-angle, then get out.',
-  ],
-  Initiator: [
-    'Flash or recon before anyone peeks. That includes you.',
-    'Your duelist takes first contact. You are the second player through.',
-    'On defense, get early information with utility, not with your body.',
-  ],
-  Controller: [
-    'Smoke first, then let a teammate take first contact. You go second.',
-    'You are worth more alive. Your smokes win the late round.',
-    'On defense, hold from a spot you can leave after the first shot.',
-  ],
-  Sentinel: [
-    'Your utility takes first contact. Your body does not.',
-    'Hold an off-angle with a way out, not the default spot everyone clears.',
-    'After the first fight, fall back to your setup. Do not re-peek.',
-  ],
-  default: [
-    'Never take the first fight alone and dry. Use utility or bring a teammate.',
-    'Call where you are peeking, so the trade is ready before you swing.',
-    'On defense, play spots you can escape from after first contact.',
-  ],
-};
-
 function openingInsight(context: InsightContext): Insight | null {
   const { summary, drivers } = context;
   const { firstBloods, firstDeaths } = summary;
@@ -196,7 +168,7 @@ function openingInsight(context: InsightContext): Insight | null {
       'firstDuelBalance',
       () => 'where you get more first kills than first deaths',
     ),
-    actions: OPENING_ACTIONS[summary.mostPlayedRole ?? 'default'],
+    keep: null,
     priority: priorityOf(
       34,
       (firstDeaths - firstBloods) / firstDeaths / 0.4,
@@ -229,11 +201,7 @@ function tradingInsight(context: InsightContext): Insight | null {
       (threshold) =>
         `where more than ${whole(threshold)}% of your deaths are traded`,
     ),
-    actions: [
-      'Fight close enough to a teammate that they can swing the moment you die.',
-      'Call the angle before you peek it, so someone can follow up.',
-      'When you are alone, take information and fall back. Do not commit.',
-    ],
+    keep: null,
     priority: priorityOf(
       30,
       lobbyRate === null ? (20 - rate) / 10 : (lobbyRate - rate) / 12,
@@ -265,11 +233,7 @@ function impactInsight(context: InsightContext): Insight | null {
           'kast',
           (threshold) => `where your KAST is above ${whole(threshold)}%`,
         ),
-        actions: [
-          'If the fight looks bad, skip it and use your utility for a teammate. The assist counts.',
-          'After a kill, move. Do not re-peek the same angle.',
-          'When the round is lost, save. You keep your gun for the next one.',
-        ],
+        keep: null,
         priority: priorityOf(
           30,
           lobbyKast === null
@@ -299,11 +263,7 @@ function impactInsight(context: InsightContext): Insight | null {
         'damageDeltaPerRound',
         (threshold) => `where your damage delta is above ${signed(threshold)}`,
       ),
-      actions: [
-        'Only take fights where you have an edge. That means an off-angle, a teammate next to you, or utility on the enemy.',
-        'Stop re-peeking players who already know where you are.',
-        'When you get tagged, break line of sight and reset before you fight again.',
-      ],
+      keep: null,
       priority: priorityOf(
         28,
         -summary.damageDeltaPerRound / 40,
@@ -345,11 +305,7 @@ function firepowerInsight(context: InsightContext): Insight | null {
       (threshold) =>
         `where you deal more than ${whole(threshold)} damage per round`,
     ),
-    actions: [
-      'Throw your damage utility at the common spots on every execute and every retake.',
-      'Commit to the fights you start. Do not back off after one bullet.',
-      'Play a short deathmatch before ranked, so your first rounds are not your warmup.',
-    ],
+    keep: null,
     priority: priorityOf(
       22,
       (1 - ratio) / 0.25,
@@ -358,12 +314,19 @@ function firepowerInsight(context: InsightContext): Insight | null {
   };
 }
 
+/**
+ * HS% decides few games and swings with rank, so only a large shortfall
+ * relative to the lobby is worth a note.
+ */
+const HEADSHOT_SHORTFALL = 0.25;
+
 function aimInsight(context: InsightContext): Insight | null {
   const { summary, benchmarks, drivers } = context;
-  if (!benchmarks) return null;
+  if (!benchmarks || benchmarks.headshotPercentage === 0) return null;
 
-  const deficit = benchmarks.headshotPercentage - summary.headshotPercentage;
-  if (deficit < 4) return null;
+  const shortfall =
+    1 - summary.headshotPercentage / benchmarks.headshotPercentage;
+  if (shortfall < HEADSHOT_SHORTFALL) return null;
 
   const gap = driverGap(drivers, 'headshotPercentage');
   return {
@@ -386,27 +349,10 @@ function aimInsight(context: InsightContext): Insight | null {
         (threshold) => `where your headshot rate is above ${whole(threshold)}%`,
       ) ??
       'Your win rate barely moves with this stat, so build it slowly and fix the other things first.',
-    actions: [
-      'Keep your crosshair at head height on the next angle while you move. You should never have to flick up.',
-      'Tap or burst at range. Do not spray.',
-      'Warm up with first-bullet accuracy only. One tap, reset, repeat.',
-    ],
-    priority: priorityOf(12, deficit / 10, gap),
+    keep: null,
+    priority: priorityOf(12, shortfall / 0.5, gap),
   };
 }
-
-const SIDE_ACTIONS = {
-  attack: [
-    'Spend the first 20 to 30 seconds taking map control. Pick a site once you know something.',
-    'Hit the site together behind one piece of utility. Do not trickle in.',
-    'After the plant, hold a crossfire on the spike. Stop hunting for kills.',
-  ],
-  defense: [
-    'Do not die early for free. Hold with a teammate, or from an angle you can back out of.',
-    'When a site is lost, fall back and retake together. Do not fight it alone.',
-    'Use utility to delay the push. Every second you buy lets a rotation arrive.',
-  ],
-} as const;
 
 const SIDE_GAP_POINTS = 6;
 const SIDE_LOSING_RATE = 47;
@@ -446,7 +392,7 @@ function sideInsight(context: InsightContext): Insight | null {
     comparison: `${whole(sides[stronger].winRate)}% on ${stronger}`,
     why: `You win ${whole(sides[weaker].winRate)}% of ${weaker} rounds and ${whole(sides[stronger].winRate)}% on ${stronger}. Some gap between sides is normal. This one is big enough that closing part of it adds rounds every game.`,
     evidence: null,
-    actions: [...SIDE_ACTIONS[weaker]],
+    keep: null,
     priority: priorityOf(30, gap / 14, 0),
   };
 }
@@ -461,9 +407,6 @@ function mapInsight(context: InsightContext): Insight | null {
   const worst = [...sampled].sort(
     (first, second) => first.winRate - second.winRate,
   )[0];
-  const best = [...sampled].sort(
-    (first, second) => second.winRate - first.winRate,
-  )[0];
   const deficit = summary.winRate - worst.winRate;
   if (deficit < 12) return null;
 
@@ -477,11 +420,7 @@ function mapInsight(context: InsightContext): Insight | null {
     comparison: `${worst.wins} wins in ${worst.matches} games · ${whole(summary.winRate)}% overall`,
     why: `It is your weakest map with enough games to judge, and it is ${whole((worst.matches / summary.matchCount) * 100)}% of your matches. A plan for this one map is worth more than general practice.`,
     evidence: null,
-    actions: [
-      `VOD one ${worst.name} loss and write down why you died each time.`,
-      `Learn one default setup and one retake plan per site for your main agent on ${worst.name}.`,
-      `Your best map is ${best.name} (${whole(best.winRate)}%). Work out what you do differently there.`,
-    ],
+    keep: null,
     priority: priorityOf(26, deficit / 30, 0),
   };
 }
@@ -521,11 +460,7 @@ function agentInsight(context: InsightContext): Insight | null {
     comparison: `${best.name} wins ${whole(best.winRate)}%`,
     why: `Your results change with the agent you lock. ${best.name} wins ${whole(best.winRate)}% over ${best.matches} matches. Compare that with ${weakNames}. Playing what already works gets you more consistent ranked games.`,
     evidence: null,
-    actions: [
-      `Lock ${best.name} whenever the comp allows it.`,
-      `Play ${worst.name} in unrated before you bring it back to ranked.`,
-      'Stick to two or three agents, so you run the same setups every game.',
-    ],
+    keep: null,
     priority: priorityOf(28, (best.winRate - worst.winRate) / 60, 0),
   };
 }
@@ -549,11 +484,7 @@ function staminaInsight(context: InsightContext): Insight | null {
     comparison: `${whole(sessions.early.winRate)}% in your first two games`,
     why: 'You win less from the third game of a session onwards. Tilt and fatigue build up, so decide when you stop before you start. That protects the RR your first games earned.',
     evidence: null,
-    actions: [
-      'Set a stop rule before you queue. Three games, or two losses in a row, then you are done.',
-      'Take ten minutes away from the screen between games.',
-      'If you want to keep playing, switch to unrated or deathmatch.',
-    ],
+    keep: null,
     priority: priorityOf(24, drop / 30, 0),
   };
 }
@@ -561,18 +492,8 @@ function staminaInsight(context: InsightContext): Insight | null {
 function strengthInsights(context: InsightContext): Insight[] {
   const { summary, benchmarks, breakdowns, trends } = context;
   const strengths: Insight[] = [];
-  const strength = (
-    insight: Omit<Insight, 'tone' | 'evidence' | 'actions'> & {
-      keep: string | null;
-    },
-  ): void => {
-    const { keep, ...rest } = insight;
-    strengths.push({
-      ...rest,
-      tone: 'strength',
-      evidence: null,
-      actions: keep === null ? [] : [keep],
-    });
+  const strength = (insight: Omit<Insight, 'tone' | 'evidence'>): void => {
+    strengths.push({ ...insight, tone: 'strength', evidence: null });
   };
 
   if (

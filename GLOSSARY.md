@@ -1,12 +1,12 @@
-# Radiant Stats
+# RNKUP
 
-Radiant Stats presents recent Valorant competitive performance for a player
+RNKUP presents recent Valorant competitive performance for a player
 identified by their Riot ID.
 
 ## Language
 
 **Player**:
-A Valorant account whose competitive performance is viewed in Radiant Stats.
+A Valorant account whose competitive performance is viewed in RNKUP.
 _Avoid_: User, account
 
 **Riot ID**:
@@ -37,6 +37,20 @@ _Avoid_: Match history (ambiguous)
 **Match Detail**:
 One Competitive Match in full: both teams, every round, and who killed whom,
 seen from one Player's side.
+
+**Round Replay**:
+A round shown as a series of still frames, one per kill, plant and defuse,
+with every living player's position and facing at that moment. HenrikDev only
+records positions at those events, so it is not continuous movement.
+
+**Buy Type**:
+How much a team spent in a round, from its total loadout value: Eco (under
+5,000), Semi-eco (under 10,000), Half buy (under 20,000) or Full buy.
+_Avoid_: Force buy (not detected)
+
+**Economy Swing**:
+A round won while buying at least two Buy Types below the enemy, or lost
+while buying at least two above them.
 
 **Competitive Match**:
 One completed Valorant competitive game in a Player's Competitive History.
@@ -92,6 +106,14 @@ The first enemy elimination in a round credited to the Player.
 **First Death**:
 Being the first player eliminated in a round.
 
+**Opening Duel**:
+The round's first kill, seen from one Player: won if they got the First
+Blood, lost if it was their First Death.
+
+**First Kills per First Death**:
+First Bloods divided by First Deaths. Above 1.0 means the Player wins more
+opening duels than they lose.
+
 **KAST**:
 The percentage of rounds in which the Player got a kill, an assist, survived,
 or had their death traded.
@@ -106,8 +128,8 @@ Damage dealt minus damage received, per round.
 The mean of the other nine players in the same Competitive Matches.
 
 **Insight**:
-A coaching note that names one thing to fix or keep, why it matters, and a
-drill for the next game.
+A coaching note that names one thing to fix or keep and the numbers it is
+based on.
 _Avoid_: Tip, recommendation
 
 **Available History**:

@@ -50,10 +50,13 @@ export function rankColor(tierId: number): string {
   return index === null ? UNRANKED_COLOR : DIVISIONS[index].color;
 }
 
-export function rankIconUrl(tierId: number): string | null {
+export function rankIconUrl(
+  tierId: number,
+  size: 'small' | 'large' = 'small',
+): string | null {
   if (tierId !== RADIANT_TIER && divisionIndex(tierId) === null) return null;
 
-  return `https://media.valorant-api.com/competitivetiers/${TIER_ICON_SET}/${tierId}/smallicon.png`;
+  return `https://media.valorant-api.com/competitivetiers/${TIER_ICON_SET}/${tierId}/${size}icon.png`;
 }
 
 export function toRank(tierId: number): Rank {

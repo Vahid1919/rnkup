@@ -16,6 +16,7 @@ import {
   type MatchInput,
   type MatchKillInput,
   type MatchPlayerInput,
+  type MatchPlayerPosition,
   type MatchRoundInput,
   type MatchRoundPlayerInput,
   type MatchSide,
@@ -27,6 +28,7 @@ import type {
   LeaderboardSlice,
   LeaderboardThreshold,
 } from '$lib/leaderboard';
+import type { MapPoint } from '$lib/maps';
 import { type Rank, toRank } from '$lib/ranks';
 import { PlayerLookupError } from './errors';
 
@@ -299,6 +301,37 @@ function parseSide(value: unknown): MatchSide | null {
   return null;
 }
 
+/** Shares one string per player so cached matches don't repeat every ID. */
+type Intern = (puuid: string) => string;
+
+function parseLocation(value: unknown): MapPoint | null {
+  const location = optionalRecord(value);
+  const x = optionalFiniteNumber(location, 'x');
+  const y = optionalFiniteNumber(location, 'y');
+  return x === null || y === null ? null : { x, y };
+}
+
+/** HenrikDev nests the ID under `player`; its published schema puts it at the top. */
+function parsePositions(value: unknown, intern: Intern): MatchPlayerPosition[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const entry = optionalRecord(item);
+    const puuid =
+      optionalString(optionalRecord(entry?.player), 'puuid') ??
+      optionalString(entry, 'puuid');
+    const location = parseLocation(entry?.location);
+    if (puuid === null || location === null) return [];
+    return [
+      {
+        puuid: intern(puuid),
+        x: location.x,
+        y: location.y,
+        viewRadians: optionalFiniteNumber(entry, 'view_radians'),
+      },
+    ];
+  });
+}
+
 function parseRoundPlayer(value: unknown): MatchRoundPlayerInput | null {
   const entry = optionalRecord(value);
   const puuid = optionalString(optionalRecord(entry?.player), 'puuid');
@@ -323,6 +356,7 @@ function parseRoundPlayer(value: unknown): MatchRoundPlayerInput | null {
     loadoutValue: optionalNonNegativeInteger(economy, 'loadout_value'),
     weaponName: optionalString(optionalRecord(economy?.weapon), 'name'),
     armorName: optionalString(optionalRecord(economy?.armor), 'name'),
+    creditsRemaining: optionalNonNegativeInteger(economy, 'remaining'),
   };
 }
 
@@ -343,7 +377,7 @@ function inferWinningSide(
 }
 
 /** Rounds and kills enrich a match; a malformed entry is skipped, not fatal. */
-function parseRound(value: unknown): MatchRoundInput | null {
+function parseRound(value: unknown, intern: Intern): MatchRoundInput | null {
   const round = optionalRecord(value);
   const id = optionalNonNegativeInteger(round, 'id');
   if (!round || id === null) return null;
@@ -366,14 +400,21 @@ function parseRound(value: unknown): MatchRoundInput | null {
     plant:
       planter !== null && plantTime !== null
         ? {
-            playerPuuid: planter,
+            playerPuuid: intern(planter),
             site: optionalString(plant, 'site'),
             timeMs: plantTime,
+            location: parseLocation(plant?.location),
+            positions: parsePositions(plant?.player_locations, intern),
           }
         : null,
     defuse:
       defuser !== null && defuseTime !== null
-        ? { playerPuuid: defuser, timeMs: defuseTime }
+        ? {
+            playerPuuid: intern(defuser),
+            timeMs: defuseTime,
+            location: parseLocation(defuse?.location),
+            positions: parsePositions(defuse?.player_locations, intern),
+          }
         : null,
     players: Array.isArray(round.stats)
       ? round.stats.flatMap((entry) => {
@@ -384,7 +425,7 @@ function parseRound(value: unknown): MatchRoundInput | null {
   };
 }
 
-function parseKill(value: unknown): MatchKillInput | null {
+function parseKill(value: unknown, intern: Intern): MatchKillInput | null {
   const kill = optionalRecord(value);
   const round = optionalNonNegativeInteger(kill, 'round');
   const timeMs = optionalNonNegativeInteger(kill, 'time_in_round_in_ms');
@@ -403,15 +444,17 @@ function parseKill(value: unknown): MatchKillInput | null {
   return {
     round: round + 1,
     timeMs,
-    killerPuuid,
-    victimPuuid,
+    killerPuuid: intern(killerPuuid),
+    victimPuuid: intern(victimPuuid),
     assistantPuuids: Array.isArray(kill.assistants)
       ? kill.assistants.flatMap((assistant) => {
           const puuid = optionalString(optionalRecord(assistant), 'puuid');
-          return puuid === null ? [] : [puuid];
+          return puuid === null ? [] : [intern(puuid)];
         })
       : [],
     weaponName: optionalString(optionalRecord(kill.weapon), 'name'),
+    victimLocation: parseLocation(kill.location),
+    positions: parsePositions(kill.player_locations, intern),
   };
 }
 
@@ -432,6 +475,15 @@ export function parseMatch(value: unknown): MatchInput {
       'HenrikDev returned a match without player or team data.',
     );
   }
+
+  const players = match.players.map(parseMatchPlayer);
+  const known = new Map(players.map((player) => [player.puuid, player.puuid]));
+  const intern: Intern = (puuid) => {
+    const shared = known.get(puuid);
+    if (shared !== undefined) return shared;
+    known.set(puuid, puuid);
+    return puuid;
+  };
 
   return {
     id: requiredString(
@@ -454,16 +506,16 @@ export function parseMatch(value: unknown): MatchInput {
     seasonShort: optionalString(optionalRecord(metadata.season), 'short'),
     region: optionalString(metadata, 'region'),
     teams: match.teams.map(parseMatchTeam),
-    players: match.players.map(parseMatchPlayer),
+    players,
     rounds: Array.isArray(match.rounds)
       ? match.rounds.flatMap((round) => {
-          const parsed = parseRound(round);
+          const parsed = parseRound(round, intern);
           return parsed ? [parsed] : [];
         })
       : [],
     kills: Array.isArray(match.kills)
       ? match.kills.flatMap((kill) => {
-          const parsed = parseKill(kill);
+          const parsed = parseKill(kill, intern);
           return parsed ? [parsed] : [];
         })
       : [],

@@ -9,13 +9,21 @@
     lobbyValue?: number | null;
     /** Shown instead of the lobby gap when there is no lobby average. */
     note?: string | null;
+    /** Replaces the definition's short label. */
+    label?: string | null;
   };
 
-  let { stat, value, lobbyValue = null, note = null }: Props = $props();
+  let {
+    stat,
+    value,
+    lobbyValue = null,
+    note = null,
+    label = null,
+  }: Props = $props();
 
   const definition = $derived(STAT_DEFINITIONS[stat]);
   const isAbbreviation = $derived(
-    definition.label === definition.label.toUpperCase(),
+    label === null && definition.label === definition.label.toUpperCase(),
   );
   const gap = $derived(
     value !== null && lobbyValue !== null
@@ -24,12 +32,16 @@
   );
 </script>
 
-<div class="headline">
-  <dt class="stat-label">
+<div
+  class="headline"
+  class:tone-good={gap?.tone === 'good'}
+  class:tone-bad={gap?.tone === 'bad'}
+>
+  <dt>
     {#if isAbbreviation}
       <abbr title={definition.description}>{definition.label}</abbr>
     {:else}
-      {definition.label}
+      {label ?? definition.label}
     {/if}
   </dt>
   <dd>
@@ -54,14 +66,35 @@
 </div>
 
 <style>
-  /* A raised tile, so the four headline stats read as one row of cards. */
+  /* A raised card with a bar on the left that takes the lobby comparison's colour. */
   .headline {
+    --bar: var(--val-line-strong);
+    position: relative;
     display: grid;
     align-content: start;
-    gap: var(--space-2);
+    gap: var(--space-1);
     border-radius: var(--radius);
-    padding: var(--space-4);
+    padding: var(--space-4) var(--space-3) var(--space-4) var(--space-5);
     background: var(--val-panel-raised);
+  }
+
+  .headline::before {
+    position: absolute;
+    top: var(--space-4);
+    bottom: var(--space-4);
+    left: var(--space-3);
+    width: 3px;
+    border-radius: 2px;
+    background: var(--bar);
+    content: '';
+  }
+
+  .headline.tone-good {
+    --bar: var(--val-win);
+  }
+
+  .headline.tone-bad {
+    --bar: var(--val-loss);
   }
 
   dt,
@@ -69,9 +102,15 @@
     margin: 0;
   }
 
+  dt {
+    color: var(--val-muted);
+    font-size: var(--text-md);
+    font-weight: 500;
+  }
+
   dd {
     display: grid;
-    gap: var(--space-2);
+    gap: var(--space-1);
   }
 
   strong {

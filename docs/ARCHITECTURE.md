@@ -1,6 +1,6 @@
 # Architecture
 
-A guide for developers new to Radiant Stats: how the code is laid out, how a
+A guide for developers new to RNKUP: how the code is laid out, how a
 request becomes a page, and where to make common changes. Terms such as
 "Competitive History" and "KAST" are defined in [GLOSSARY.md](../GLOSSARY.md);
 the reasons behind the bigger choices are in [docs/adr/](adr/).
@@ -50,9 +50,11 @@ src/
       drivers.ts                Which stats separate wins from losses
       insights.ts               Coaching rules and per-match takeaways (see ADR 0004)
       history.ts                Match log and per-act summaries
+      rating-range.ts           Time windows (1M to All) for the rank rating chart
       stats.ts                  Labels, units and accessors for each stat
       math.ts                   Rounding and percentage helpers
-    match-detail.ts             One match: scoreboard, rounds, KAST, trades, duels
+    match-detail.ts             One match: scoreboard, rounds, KAST, trades, duels, round replay, buys
+    maps.ts                     Minimap images and game-to-minimap projection (see ADR 0005)
     leaderboard.ts              Leaderboard types, URL filters and Radiant paging
     player-profile.ts           Profile type
     agents.ts, ranks.ts         Static Valorant reference data (roles, images, tiers)
@@ -60,6 +62,7 @@ src/
     components/                 Shared Svelte components (LoadingBar is the delayed top progress bar)
       player/                   Player page sections (header, focus, form, trends, breakdown, matches)
         insight-stats.ts        Which stat each coaching insight is about (for the KAST explainer)
+      match/                    Match page sections (Minimap, RoundReview, MatchMap, EconomyChart)
   routes/
     +page.svelte                Search page
     +layout.svelte              Global styles, skip link and loading bar
@@ -103,7 +106,12 @@ static/images/                  Agent and app images
    a cached match when the dashboard already loaded it.
 2. `buildMatchDetail()` (in `match-detail.ts`) derives the scoreboard, rounds
    and duels; `buildMatchTakeaways()` writes the short notes.
-3. The player's recent averages come from the dashboard cache only if it is
+3. The page's sections read the same `MatchDetail` through pure helpers:
+   `roundEvents()` and `roundSnapshot()` for the round replay,
+   `playerEncounters()` for the kills and deaths map, and `buyRecords()` and
+   `economySwings()` for the economy. `maps.ts` places positions on the
+   minimap.
+4. The player's recent averages come from the dashboard cache only if it is
    warm, so a match page never triggers a full history lookup.
 
 ### Browsing the leaderboard
@@ -129,7 +137,8 @@ static/images/                  Agent and app images
 | Change a match-page number (KAST, trades, …) | `match-detail.ts`, plus `tests/match-detail.test.ts`                            |
 | Change caching or request limits             | `server/valorant/cache.ts` or the constants in `henrik-client.ts`               |
 | Change leaderboard filters or paging         | `leaderboard.ts`, plus `tests/leaderboard.test.ts`                              |
-| Change how a section looks                   | `components/player/` (`PlayerHeader`, `*Section.svelte`) or the match page      |
+| Change how a section looks                   | `components/player/` (`PlayerHeader`, `*Section.svelte`) or `components/match/` |
+| Add or fix a map's minimap placement         | `MAP_CALIBRATIONS` in `maps.ts` (see ADR 0005)                                  |
 | Change colours, fonts or shared styles       | `src/app.css`                                                                   |
 | Change an error message or status            | `server/valorant/errors.ts` or the route's `+page.server.ts`                    |
 
@@ -177,5 +186,3 @@ These are undecided. Record the choice in `docs/adr/` when one is made.
 
 - Whether to keep Tailwind (imported, unused) or remove it.
 - How caching should work if the app ever runs as more than one process.
-- Whether the match page should have its own section components like the
-  player page.

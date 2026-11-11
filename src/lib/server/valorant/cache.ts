@@ -31,10 +31,10 @@ type LookupCaches = {
 };
 
 const cacheHolder = globalThis as typeof globalThis & {
-  __radiantStatsCaches?: LookupCaches;
+  __rnkupCaches?: LookupCaches;
 };
 
-const caches: LookupCaches = (cacheHolder.__radiantStatsCaches ??= {
+const caches: LookupCaches = (cacheHolder.__rnkupCaches ??= {
   profiles: new Map(),
   dashboards: new Map(),
   matches: new Map(),

@@ -1,7 +1,10 @@
 {
-  "name": "radiant-stats",
+  "name": "rnkup",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",

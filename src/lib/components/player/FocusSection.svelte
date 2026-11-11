@@ -1,4 +1,4 @@
-<!-- Coaching: up to three notes with the numbers behind them, then strengths behind a disclosure. -->
+<!-- Coaching: what to work on, then what is already working, in one list. -->
 <script lang="ts">
   import InsightCard from '$lib/components/InsightCard.svelte';
   import type { CompetitiveSummary, InsightReport } from '$lib/dashboard';
@@ -9,15 +9,17 @@
   };
 
   let { summary, insights }: Props = $props();
+  const notes = $derived([...insights.focus, ...insights.strengths]);
 </script>
 
 <section id="focus" class="page-section" aria-labelledby="focus-title">
   <div class="section-heading">
-    <h2 id="focus-title" class="section-title">What to work on</h2>
+    <h2 id="focus-title" class="section-title">Coaching</h2>
     <p class="section-intro">
       Worked out from the same {summary.matchCount} matches as the stats above. Each
-      note shows the number it is based on, and they are ordered by how much that
-      number separates your wins from your losses.
+      note shows the number it is based on. Things to work on come first, ordered
+      by how much they separate your wins from your losses, then what you already
+      do well.
     </p>
   </div>
 
@@ -28,25 +30,14 @@
       Nothing here is losing you games. You are level with or ahead of your
       lobbies across the board, so keep queueing.
     </p>
-  {:else}
-    <ol class="insight-list">
-      {#each insights.focus as insight, index (insight.id)}
-        <li><InsightCard {insight} {index} /></li>
-      {/each}
-    </ol>
   {/if}
 
-  {#if insights.strengths.length > 0}
-    <details class="more strengths">
-      <summary>
-        What you already do well <small>{insights.strengths.length}</small>
-      </summary>
-      <ul class="insight-list more-body">
-        {#each insights.strengths as insight (insight.id)}
-          <li><InsightCard {insight} /></li>
-        {/each}
-      </ul>
-    </details>
+  {#if notes.length > 0}
+    <ul class="insight-list">
+      {#each notes as insight (insight.id)}
+        <li><InsightCard {insight} /></li>
+      {/each}
+    </ul>
   {/if}
 </section>
 
@@ -71,8 +62,8 @@
     list-style: none;
   }
 
-  .strengths {
-    margin-top: var(--space-4);
+  .notice + .insight-list {
+    margin-top: var(--space-6);
   }
 
   @media (max-width: 900px) {

@@ -25,7 +25,7 @@
 </script>
 
 <svelte:head>
-  <title>{heading} | Radiant Stats</title>
+  <title>{heading} | RNKUP</title>
 </svelte:head>
 
 <Nav />

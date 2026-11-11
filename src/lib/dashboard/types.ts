@@ -64,6 +64,7 @@ export type CompetitiveMatchInput = {
     won: number;
     lost: number;
   };
+  durationMs: number | null;
   /** 1 is the highest combat score among all players in the match. */
   placement: number | null;
   stats: CompetitiveMatchInputStatistics;
@@ -155,6 +156,8 @@ export type CompetitiveSummary = {
   firstDeathRoundWinRate: number | null;
   tradedDeathRate: number | null;
   multiKills: number | null;
+  /** Null when no match reported its length. */
+  playtimeMs: number | null;
   averagePlacement: number | null;
   accuracy: { head: number; body: number; legs: number };
   mostPlayedAgent: string | null;

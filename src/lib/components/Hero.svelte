@@ -80,7 +80,7 @@
   <div class="art" aria-hidden="true">
     <div class="art-backdrop"></div>
     <div class="art-figure">
-      <AgentImage agentName="Jett" decorative />
+      <AgentImage agentName="Hush" decorative />
     </div>
   </div>
 
@@ -146,7 +146,7 @@
     z-index: 1;
     width: min(100%, 72rem);
     margin: 0 auto;
-    padding: var(--space-7) clamp(1.25rem, 4vw, 2rem);
+    padding: var(--space-7) clamp(1.25rem, 4vw, 2.5rem);
   }
 
   .content {

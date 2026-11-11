@@ -1,6 +1,7 @@
 <script lang="ts">
   import { resolve } from '$app/paths';
   import { page } from '$app/state';
+  import { minimapUrl } from '$lib/maps';
 
   const DASHBOARD_ROUTE = '/players/[name]/[tag]';
   const MATCH_ROUTE = '/players/[name]/[tag]/matches/[matchId]';
@@ -31,36 +32,66 @@
       label: 'Scoreboard',
     },
     {
-      route: '/players/[name]/[tag]/matches/[matchId]#deep-dive',
-      hash: '#deep-dive',
-      label: 'Deep dive',
+      route: '/players/[name]/[tag]/matches/[matchId]#rounds',
+      hash: '#rounds',
+      label: 'Rounds',
+      needs: 'rounds',
+    },
+    {
+      route: '/players/[name]/[tag]/matches/[matchId]#map',
+      hash: '#map',
+      label: 'Map',
+      needs: 'map',
+    },
+    {
+      route: '/players/[name]/[tag]/matches/[matchId]#economy',
+      hash: '#economy',
+      label: 'Economy',
+      needs: 'rounds',
+    },
+    {
+      route: '/players/[name]/[tag]/matches/[matchId]#duels',
+      hash: '#duels',
+      label: 'Duels',
+      needs: 'rounds',
     },
   ] as const;
 
-  // The deep dive only renders when the provider sent round data.
-  function hasRoundData(data: unknown): boolean {
+  type MatchContent = { rounds: boolean; map: boolean };
+
+  // Round sections only render when the provider sent round data, and the
+  // map only for maps with a known minimap.
+  function matchContent(data: unknown): MatchContent {
     if (typeof data !== 'object' || data === null || !('match' in data)) {
-      return false;
+      return { rounds: false, map: false };
     }
     const match: unknown = data.match;
-    return (
+    const rounds =
       typeof match === 'object' &&
       match !== null &&
       'hasRoundData' in match &&
       match.hasRoundData === true &&
       'rounds' in match &&
       Array.isArray(match.rounds) &&
-      match.rounds.length > 0
-    );
+      match.rounds.length > 0;
+    const mapId =
+      typeof match === 'object' &&
+      match !== null &&
+      'mapId' in match &&
+      typeof match.mapId === 'string'
+        ? match.mapId
+        : null;
+    return { rounds, map: rounds && minimapUrl(mapId) !== null };
   }
 
   const isDashboard = $derived(page.route.id === DASHBOARD_ROUTE);
   const isMatch = $derived(page.route.id === MATCH_ROUTE);
-  const visibleMatchSections = $derived(
-    hasRoundData(page.data)
-      ? matchSections
-      : matchSections.filter((section) => section.hash !== '#deep-dive'),
-  );
+  const visibleMatchSections = $derived.by(() => {
+    const content = matchContent(page.data);
+    return matchSections.filter(
+      (section) => !('needs' in section) || content[section.needs],
+    );
+  });
   const playerParams = $derived({
     name: page.params.name ?? '',
     tag: page.params.tag ?? '',

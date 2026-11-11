@@ -107,6 +107,7 @@ export function summarizeMatchForPlayer(
     outcome:
       team.roundsWon === team.roundsLost ? 'draw' : team.won ? 'win' : 'loss',
     score: { won: team.roundsWon, lost: team.roundsLost },
+    durationMs: detail.durationMs,
     placement: detail.players.length > 1 ? player.placement : null,
     stats: {
       kills: stats.kills,

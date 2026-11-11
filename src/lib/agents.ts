@@ -9,6 +9,7 @@ export const AGENTS = [
   'Fade',
   'Gekko',
   'Harbor',
+  'Hush',
   'Iso',
   'Jett',
   'KAYO',

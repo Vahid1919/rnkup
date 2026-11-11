@@ -1,3 +1,4 @@
+import type { MapPoint } from './maps';
 import { averageRank, type Rank } from './ranks';
 
 /**
@@ -9,6 +10,13 @@ import { averageRank, type Rank } from './ranks';
 export type MatchSide = 'attack' | 'defense';
 export type RoundEndType = 'elimination' | 'defuse' | 'detonate' | 'other';
 export type BuyType = 'eco' | 'semi-eco' | 'semi-buy' | 'full-buy';
+
+export const BUY_TYPE_LABELS: Record<BuyType, string> = {
+  eco: 'Eco',
+  'semi-eco': 'Semi-eco',
+  'semi-buy': 'Half buy',
+  'full-buy': 'Full buy',
+};
 
 export type MatchPlayerInput = {
   puuid: string;
@@ -46,6 +54,31 @@ export type MatchRoundPlayerInput = {
   loadoutValue: number | null;
   weaponName: string | null;
   armorName: string | null;
+  /** Credits left unspent after the buy phase. */
+  creditsRemaining: number | null;
+};
+
+/** Where a living player stood, and which way they faced, at one moment. */
+export type MatchPlayerPosition = {
+  puuid: string;
+  x: number;
+  y: number;
+  viewRadians: number | null;
+};
+
+export type MatchPlantInput = {
+  playerPuuid: string;
+  site: string | null;
+  timeMs: number;
+  location: MapPoint | null;
+  positions: MatchPlayerPosition[];
+};
+
+export type MatchDefuseInput = {
+  playerPuuid: string;
+  timeMs: number;
+  location: MapPoint | null;
+  positions: MatchPlayerPosition[];
 };
 
 export type MatchRoundInput = {
@@ -53,8 +86,8 @@ export type MatchRoundInput = {
   winningTeamId: string | null;
   winningSide: MatchSide | null;
   endType: RoundEndType;
-  plant: { playerPuuid: string; site: string | null; timeMs: number } | null;
-  defuse: { playerPuuid: string; timeMs: number } | null;
+  plant: MatchPlantInput | null;
+  defuse: MatchDefuseInput | null;
   players: MatchRoundPlayerInput[];
 };
 
@@ -65,6 +98,10 @@ export type MatchKillInput = {
   victimPuuid: string;
   assistantPuuids: string[];
   weaponName: string | null;
+  /** Where the victim died. */
+  victimLocation: MapPoint | null;
+  /** Living players at the moment of the kill; includes the killer. */
+  positions: MatchPlayerPosition[];
 };
 
 export type MatchInput = {
@@ -134,6 +171,7 @@ export type MatchRoundTeam = {
   side: MatchSide | null;
   loadoutValue: number | null;
   buyType: BuyType | null;
+  creditsRemaining: number | null;
 };
 
 export type MatchRoundPlayer = MatchRoundPlayerInput & {
@@ -358,6 +396,12 @@ export function buildMatchDetail(input: MatchInput): MatchDetail {
           loadouts.length === 0
             ? null
             : loadouts.reduce((total, value) => total + value, 0);
+        const credits = round.players.flatMap((roundPlayer) =>
+          teamByPlayer.get(roundPlayer.puuid) === team.id &&
+          roundPlayer.creditsRemaining !== null
+            ? [roundPlayer.creditsRemaining]
+            : [],
+        );
         const side =
           round.winningSide === null || round.winningTeamId === null
             ? null
@@ -370,6 +414,10 @@ export function buildMatchDetail(input: MatchInput): MatchDetail {
           side,
           loadoutValue,
           buyType: loadoutValue === null ? null : classifyBuy(loadoutValue),
+          creditsRemaining:
+            credits.length === 0
+              ? null
+              : credits.reduce((total, value) => total + value, 0),
         };
       });
 
@@ -485,4 +533,241 @@ export function findMatchPlayerByRiotId(
         player.tag.toLocaleLowerCase() === normalizedTag,
     ) ?? null
   );
+}
+
+export type RoundEvent =
+  | { kind: 'kill'; timeMs: number; kill: MatchRoundKill }
+  | { kind: 'plant'; timeMs: number; plant: MatchPlantInput }
+  | { kind: 'defuse'; timeMs: number; defuse: MatchDefuseInput };
+
+/** Kills, the plant and the defuse of one round in the order they happened. */
+export function roundEvents(round: MatchRound): RoundEvent[] {
+  const events: RoundEvent[] = round.kills.map((kill) => ({
+    kind: 'kill',
+    timeMs: kill.timeMs,
+    kill,
+  }));
+  if (round.plant) {
+    events.push({
+      kind: 'plant',
+      timeMs: round.plant.timeMs,
+      plant: round.plant,
+    });
+  }
+  if (round.defuse) {
+    events.push({
+      kind: 'defuse',
+      timeMs: round.defuse.timeMs,
+      defuse: round.defuse,
+    });
+  }
+  // Array sort is stable, so kills at the same moment keep the feed order.
+  return events.sort((first, second) => first.timeMs - second.timeMs);
+}
+
+function eventPositions(event: RoundEvent): MatchPlayerPosition[] {
+  if (event.kind === 'kill') return event.kill.positions;
+  return event.kind === 'plant'
+    ? event.plant.positions
+    : event.defuse.positions;
+}
+
+export type SnapshotMarker = {
+  puuid: string;
+  location: MapPoint;
+  viewRadians: number | null;
+  alive: boolean;
+  /** The killer or victim of the event this snapshot shows. */
+  highlighted: boolean;
+};
+
+export type RoundSnapshot = {
+  markers: SnapshotMarker[];
+  /** From the killer to the victim when the event is a kill. */
+  shot: { from: MapPoint; to: MapPoint } | null;
+  spike: { location: MapPoint; defused: boolean } | null;
+};
+
+/**
+ * The map at one event: where everyone alive stood, where earlier victims
+ * fell, and the spike once planted. Positions are only recorded at events,
+ * so this is a series of still frames rather than continuous movement.
+ */
+export function roundSnapshot(
+  events: RoundEvent[],
+  index: number,
+): RoundSnapshot {
+  const event = events[index];
+  if (!event) return { markers: [], shot: null, spike: null };
+
+  const killer = event.kind === 'kill' ? event.kill.killerPuuid : null;
+  const victim = event.kind === 'kill' ? event.kill.victimPuuid : null;
+  const markers: SnapshotMarker[] = eventPositions(event).map((position) => ({
+    puuid: position.puuid,
+    location: { x: position.x, y: position.y },
+    viewRadians: position.viewRadians,
+    alive: true,
+    highlighted: position.puuid === killer,
+  }));
+
+  let spikeLocation: MapPoint | null = null;
+  let defused = false;
+  for (const earlier of events.slice(0, index + 1)) {
+    if (earlier.kind === 'kill' && earlier.kill.victimLocation) {
+      markers.push({
+        puuid: earlier.kill.victimPuuid,
+        location: earlier.kill.victimLocation,
+        viewRadians: null,
+        alive: false,
+        highlighted: earlier === event,
+      });
+    } else if (earlier.kind === 'plant' && earlier.plant.location) {
+      spikeLocation = earlier.plant.location;
+    } else if (earlier.kind === 'defuse') {
+      defused = true;
+    }
+  }
+
+  let shot: RoundSnapshot['shot'] = null;
+  if (event.kind === 'kill' && event.kill.victimLocation) {
+    const from = markers.find(
+      (marker) => marker.alive && marker.puuid === killer,
+    );
+    if (from && victim !== killer) {
+      shot = { from: from.location, to: event.kill.victimLocation };
+    }
+  }
+
+  return {
+    markers,
+    shot,
+    spike: spikeLocation === null ? null : { location: spikeLocation, defused },
+  };
+}
+
+export type PlayerEncounter = {
+  round: number;
+  side: MatchSide | null;
+  kind: 'kill' | 'death';
+  /** Where the player stood. */
+  location: MapPoint;
+  /** Where the opponent stood, when recorded. */
+  opponentLocation: MapPoint | null;
+  opponentPuuid: string;
+  weaponName: string | null;
+  timeMs: number;
+  /** The round's first kill, won or lost by this player. */
+  isOpening: boolean;
+};
+
+/** Every kill and death of one player against the enemy team, with positions. */
+export function playerEncounters(
+  detail: MatchDetail,
+  puuid: string,
+): PlayerEncounter[] {
+  const teamId = detail.players.find(
+    (player) => player.puuid === puuid,
+  )?.teamId;
+  if (teamId === undefined) return [];
+  const teamByPlayer = new Map(
+    detail.players.map((player) => [player.puuid, player.teamId]),
+  );
+
+  return detail.rounds.flatMap((round) => {
+    const side =
+      round.teams.find((team) => team.teamId === teamId)?.side ?? null;
+    return round.kills.flatMap((kill): PlayerEncounter[] => {
+      const enemy =
+        kill.killerPuuid === puuid ? kill.victimPuuid : kill.killerPuuid;
+      if (teamByPlayer.get(enemy) === teamId) return [];
+
+      const killerPosition = kill.positions.find(
+        (position) => position.puuid === kill.killerPuuid,
+      );
+      const killerLocation = killerPosition
+        ? { x: killerPosition.x, y: killerPosition.y }
+        : null;
+      const base = {
+        round: round.number,
+        side,
+        opponentPuuid: enemy,
+        weaponName: kill.weaponName,
+        timeMs: kill.timeMs,
+        isOpening: kill.isFirstKill,
+      };
+
+      if (kill.killerPuuid === puuid && killerLocation) {
+        return [
+          {
+            ...base,
+            kind: 'kill',
+            location: killerLocation,
+            opponentLocation: kill.victimLocation,
+          },
+        ];
+      }
+      if (kill.victimPuuid === puuid && kill.victimLocation) {
+        return [
+          {
+            ...base,
+            kind: 'death',
+            location: kill.victimLocation,
+            opponentLocation: killerLocation,
+          },
+        ];
+      }
+      return [];
+    });
+  });
+}
+
+export type BuyRecord = {
+  buyType: BuyType;
+  played: number;
+  won: number;
+};
+
+const BUY_ORDER: BuyType[] = ['eco', 'semi-eco', 'semi-buy', 'full-buy'];
+
+/** How often a team converted each kind of buy into a round win. */
+export function buyRecords(detail: MatchDetail, teamId: string): BuyRecord[] {
+  const records = new Map<BuyType, BuyRecord>(
+    BUY_ORDER.map((buyType) => [buyType, { buyType, played: 0, won: 0 }]),
+  );
+  for (const round of detail.rounds) {
+    const buyType = round.teams.find((team) => team.teamId === teamId)?.buyType;
+    const record = buyType ? records.get(buyType) : undefined;
+    if (!record) continue;
+    record.played += 1;
+    if (round.winningTeamId === teamId) record.won += 1;
+  }
+  return BUY_ORDER.flatMap((buyType) => {
+    const record = records.get(buyType);
+    return record && record.played > 0 ? [record] : [];
+  });
+}
+
+export type EconomySwings = {
+  /** Rounds lost while buying at least two tiers above the enemy. */
+  lostWithBetterBuy: number[];
+  /** Rounds won while buying at least two tiers below the enemy. */
+  wonWithWorseBuy: number[];
+};
+
+/** Rounds where the result went against the money, e.g. a full buy lost to an eco. */
+export function economySwings(
+  detail: MatchDetail,
+  teamId: string,
+): EconomySwings {
+  const swings: EconomySwings = { lostWithBetterBuy: [], wonWithWorseBuy: [] };
+  for (const round of detail.rounds) {
+    const own = round.teams.find((team) => team.teamId === teamId)?.buyType;
+    const enemy = round.teams.find((team) => team.teamId !== teamId)?.buyType;
+    if (!own || !enemy) continue;
+    const gap = BUY_ORDER.indexOf(own) - BUY_ORDER.indexOf(enemy);
+    const won = round.winningTeamId === teamId;
+    if (gap >= 2 && !won) swings.lostWithBetterBuy.push(round.number);
+    if (gap <= -2 && won) swings.wonWithWorseBuy.push(round.number);
+  }
+  return swings;
 }

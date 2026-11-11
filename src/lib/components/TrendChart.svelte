@@ -1,5 +1,6 @@
 <script lang="ts">
   import { area, line, scaleLinear } from 'd3';
+  import type { Snippet } from 'svelte';
 
   export type TrendChartPoint = {
     /** Short label for the x position, usually a date. */
@@ -20,6 +21,10 @@
     wideAxis?: boolean;
     /** Plot height in pixels; the width follows the container. */
     height?: number;
+    /** Controls shown at the right of the heading, such as a range picker. */
+    actions?: Snippet;
+    /** Shown in place of the plot when there are fewer than two points. */
+    emptyMessage?: string;
   };
 
   let {
@@ -31,6 +36,8 @@
     formatTick,
     wideAxis = false,
     height = 220,
+    actions,
+    emptyMessage = 'Not enough matches to draw a trend yet.',
   }: Props = $props();
 
   // Drawn at the container's pixel width so axis text keeps its size on phones.
@@ -90,11 +97,18 @@
       .y0(height - padding.bottom)
       .y1((point) => yScale(point.value))(points) ?? '',
   );
+  // First, middle and last labels, skipping any that repeat a date already
+  // shown (several games on one day share a label).
   const xLabels = $derived(
-    [0, Math.floor(lastIndex / 2), lastIndex].filter(
-      (index, position, indexes) =>
-        index >= 0 && indexes.indexOf(index) === position,
-    ),
+    [0, lastIndex, Math.floor(lastIndex / 2)]
+      .filter(
+        (index, position, indexes) =>
+          index >= 0 &&
+          indexes.findIndex(
+            (other) => points[other]?.label === points[index]?.label,
+          ) === position,
+      )
+      .sort((first, second) => first - second),
   );
 
   const summary = $derived.by(() => {
@@ -247,6 +261,9 @@
   <div class="chart-heading">
     <h3>{title}</h3>
     <p>{description}</p>
+    {#if actions}
+      <div class="chart-actions">{@render actions()}</div>
+    {/if}
   </div>
 
   {#if hasTrend && shownPoint}
@@ -350,7 +367,7 @@
     </div>
     <figcaption class="sr-only">{summary}</figcaption>
   {:else}
-    <p class="empty-chart">Not enough matches to draw a trend yet.</p>
+    <p class="empty-chart">{emptyMessage}</p>
   {/if}
 </figure>
 
@@ -363,8 +380,20 @@
   .chart-heading {
     display: flex;
     flex-wrap: wrap;
-    align-items: baseline;
+    align-items: center;
     gap: var(--space-1) var(--space-3);
+  }
+
+  .chart-actions {
+    margin-left: auto;
+  }
+
+  /* On phones the controls take their own full-width row under the title. */
+  @media (max-width: 560px) {
+    .chart-actions {
+      flex-basis: 100%;
+      margin: var(--space-2) 0 0;
+    }
   }
 
   h3 {

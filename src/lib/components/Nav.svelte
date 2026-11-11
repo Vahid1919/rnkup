@@ -12,14 +12,8 @@
 <!-- The bar holds the site links; pages with sections add a second row. -->
 <header>
   <div class="bar">
-    <a class="brand" href={resolve('/')} aria-label="Radiant Stats home">
-      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
-        <path d="M8 2h22l-6 28H2z" />
-        <rect x="9" y="17" width="3.5" height="7" />
-        <rect x="14.25" y="12" width="3.5" height="12" />
-        <rect x="19.5" y="8" width="3.5" height="16" />
-      </svg>
-      <span class="word">Radiant Stats</span>
+    <a class="brand" href={resolve('/')} aria-label="RNKUP home">
+      <span aria-hidden="true">RNK<span class="up">UP</span></span>
     </a>
     <nav aria-label="Site">
       <ul>
@@ -43,22 +37,39 @@
 </header>
 
 <style>
+  /* No hairline at the top of the page, so the header sits on the hero as
+     one surface. Once the page scrolls, the line fades in to separate the
+     sticky header from the content passing beneath it. */
   header {
     position: sticky;
     z-index: 50;
     top: 0;
-    border-bottom: 1px solid var(--val-line);
+    border-bottom: 1px solid transparent;
     background: var(--val-bg-glass);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+  }
+
+  @supports (animation-timeline: scroll()) {
+    header {
+      animation: show-line linear both;
+      animation-range: 0 4rem;
+      animation-timeline: scroll();
+    }
+  }
+
+  @keyframes show-line {
+    to {
+      border-bottom-color: var(--val-line);
+    }
   }
 
   .bar {
     display: flex;
     width: min(100%, 72rem);
     height: var(--bar-height);
-    align-items: stretch;
-    gap: var(--space-6);
+    align-items: center;
+    gap: var(--space-7);
     margin: 0 auto;
     padding: 0 clamp(1.25rem, 4vw, 2.5rem);
   }
@@ -67,15 +78,13 @@
     display: flex;
     flex-shrink: 0;
     align-items: center;
-    align-self: center;
-    gap: var(--space-2);
     margin-left: calc(var(--space-1) * -1);
     padding: var(--space-1);
     color: var(--val-cream);
     font-family: var(--font-display);
-    font-size: var(--text-md);
-    font-weight: 500;
-    letter-spacing: 0.06em;
+    font-size: 1.875rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
     line-height: 1;
     text-decoration: none;
     text-transform: uppercase;
@@ -83,27 +92,29 @@
 
   ul {
     display: flex;
-    height: 100%;
-    gap: var(--space-5);
+    gap: var(--space-6);
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
-  /* Each link is as tall as the bar, so its underline sits on the bar's edge. */
+  /* Set in the display face to match the wordmark and headlines. */
   .site-link {
     position: relative;
-    display: flex;
-    height: 100%;
-    align-items: center;
+    display: block;
+    padding-block: var(--space-2);
     color: var(--val-muted);
-    font-size: var(--text-md);
+    font-family: var(--font-display);
+    font-size: 1.125rem;
     font-weight: 600;
+    letter-spacing: 0.06em;
     line-height: 1;
     text-decoration: none;
+    text-transform: uppercase;
     transition: color 150ms ease;
   }
 
+  /* The current page gets a short red bar under its label. */
   .site-link::after {
     position: absolute;
     right: 0;
@@ -112,8 +123,9 @@
     height: 2px;
     content: '';
     background: var(--val-red);
-    opacity: 0;
-    transition: opacity 150ms ease;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 200ms ease;
   }
 
   .site-link:hover,
@@ -122,30 +134,28 @@
   }
 
   .site-link[aria-current]::after {
-    opacity: 1;
+    transform: scaleX(1);
   }
 
-  .mark {
-    width: 1.5rem;
-    height: 1.5rem;
+  .up {
+    color: var(--val-red);
   }
 
-  .mark path {
-    fill: var(--val-red);
-  }
-
-  .mark rect {
-    fill: var(--val-cream);
-  }
-
-  /* The mark alone carries the brand on small screens; the links keep their labels. */
   @media (max-width: 560px) {
     .bar {
       gap: var(--space-5);
     }
 
-    .word {
-      display: none;
+    .brand {
+      font-size: 1.5rem;
+    }
+
+    ul {
+      gap: var(--space-5);
+    }
+
+    .site-link {
+      font-size: 1rem;
     }
   }
 </style>

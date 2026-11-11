@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  availableRatingRanges,
   buildCompetitivePerformance,
   buildMatchTakeaways,
+  ratingChange,
+  ratingPointsInRange,
   STAT_DEFINITIONS,
   type CompetitiveMatchInput,
+  type RatingPoint,
 } from '../src/lib/dashboard';
 import { lobbyGap } from '../src/lib/format';
 
@@ -25,6 +29,7 @@ function match(
     rank: null,
     outcome: 'win',
     score: { won: 13, lost: 9 },
+    durationMs: null,
     placement: null,
     sides: null,
     lobby: null,
@@ -189,6 +194,20 @@ describe('buildCompetitivePerformance', () => {
       mostPlayedMap: null,
     });
   });
+
+  it('adds up playtime from the matches that report their length', () => {
+    const timed = [
+      match({ id: 'a', durationMs: 1_800_000 }),
+      match({ id: 'b', durationMs: null }),
+      match({ id: 'c', durationMs: 2_400_000 }),
+    ];
+    expect(buildCompetitivePerformance(timed).summary.playtimeMs).toBe(
+      4_200_000,
+    );
+    expect(
+      buildCompetitivePerformance([match({})]).summary.playtimeMs,
+    ).toBeNull();
+  });
 });
 
 describe('coaching insights', () => {
@@ -256,6 +275,27 @@ describe('coaching insights', () => {
     expect(sideIds(5, 6)).not.toContain('weak-attack');
     expect(sideIds(4, 6)).toContain('weak-attack');
   });
+
+  it('only flags headshots far below the lobby', () => {
+    const aimIds = (headshots: number) =>
+      buildCompetitivePerformance(
+        history(10, { headshots, bodyshots: 95 - headshots }).map((entry) => ({
+          ...entry,
+          lobby: {
+            averageCombatScore: 250,
+            averageDamagePerRound: 150,
+            headshotPercentage: 35,
+            killDeathRatio: 1,
+            deathsPerRound: 0.7,
+            kast: null,
+            tradedDeathRate: null,
+          },
+        })),
+      ).insights.focus.map((insight) => insight.id);
+
+    expect(aimIds(31)).not.toContain('low-headshots');
+    expect(aimIds(25)).toContain('low-headshots');
+  });
 });
 
 describe('match takeaways', () => {
@@ -283,5 +323,48 @@ describe('lobby gaps', () => {
     expect(lobbyGap(22.9, 19.8, STAT_DEFINITIONS.tradedDeathRate).tone).toBe(
       'good',
     );
+  });
+});
+
+describe('rating ranges', () => {
+  const point = (date: string, change: number): RatingPoint => ({
+    matchId: null,
+    date,
+    rank: { id: 18, name: 'Diamond 3' },
+    rr: 50,
+    change,
+    rating: 1850,
+  });
+  const history = [
+    point('2026-01-10T20:00:00Z', 20),
+    point('2026-07-20T20:00:00Z', -18),
+    point('2026-08-20T20:00:00Z', 21),
+    point('2026-10-01T20:00:00Z', -19),
+    point('2026-11-03T20:00:00Z', 25),
+  ];
+
+  it('counts a window back from the latest game, not from today', () => {
+    expect(ratingPointsInRange(history, 3).map((entry) => entry.date)).toEqual([
+      '2026-08-20T20:00:00Z',
+      '2026-10-01T20:00:00Z',
+      '2026-11-03T20:00:00Z',
+    ]);
+    expect(ratingPointsInRange(history, null)).toHaveLength(5);
+  });
+
+  it('offers only ranges shorter than the history, plus all', () => {
+    expect(availableRatingRanges(history).map((range) => range.id)).toEqual([
+      '1m',
+      '3m',
+      '6m',
+      'all',
+    ]);
+    expect(
+      availableRatingRanges(history.slice(3)).map((range) => range.id),
+    ).toEqual(['1m', 'all']);
+  });
+
+  it('sums the RR change across the shown games', () => {
+    expect(ratingChange(ratingPointsInRange(history, 3))).toBe(27);
   });
 });

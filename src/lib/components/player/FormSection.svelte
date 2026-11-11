@@ -1,240 +1,304 @@
-<!-- The stats overview: record, four headline stats against the lobby, then the rest. -->
+<!-- The stats overview: rank, level, record and key stats from the analysed matches. -->
 <script lang="ts">
   import HeadlineStat from '$lib/components/HeadlineStat.svelte';
+  import RatingSummary from '$lib/components/player/RatingSummary.svelte';
   import {
     STAT_DEFINITIONS,
     type CompetitiveSummary,
     type LobbyBenchmarks,
+    type PlayerRating,
+    type StatKey,
   } from '$lib/dashboard';
   import { formatStat, lobbyGap, type LobbyGap } from '$lib/format';
 
   type Props = {
     summary: CompetitiveSummary;
     benchmarks: LobbyBenchmarks | null;
+    rating: PlayerRating | null;
+    level: number | null;
     /** Every match the provider has stored, not just the analysed sample. */
     storedCount: number;
   };
 
-  type LobbyStat =
-    | 'kast'
-    | 'killDeathRatio'
-    | 'averageDamagePerRound'
-    | 'averageCombatScore'
-    | 'headshotPercentage';
-
-  type SecondaryStat = {
-    key: string;
-    label: string;
-    /** Expansion for abbreviated labels. */
-    title: string | null;
-    value: string;
-    gap: LobbyGap | null;
-    note: string | null;
+  type Headline = {
+    stat: StatKey;
+    /** Null keeps the definition's label, e.g. "ACS" with its expansion. */
+    label: string | null;
+    value: number | null;
+    lobby: number | null;
   };
 
-  const HEADLINE_STATS: LobbyStat[] = [
-    'killDeathRatio',
-    'averageDamagePerRound',
-    'headshotPercentage',
-    'kast',
-  ];
+  type SmallStat = {
+    key: string;
+    label: string;
+    value: string;
+    gap: LobbyGap | null;
+  };
 
-  let { summary, benchmarks, storedCount }: Props = $props();
+  const RING_RADIUS = 42;
+  const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
 
-  const record = $derived(
-    [
-      { key: 'win', label: 'W', name: 'wins', count: summary.wins },
-      { key: 'loss', label: 'L', name: 'losses', count: summary.losses },
-      { key: 'draw', label: 'D', name: 'draws', count: summary.draws },
-    ].filter((part) => part.count > 0),
-  );
+  let { summary, benchmarks, rating, level, storedCount }: Props = $props();
+
+  const numberFormat = new Intl.NumberFormat('en-US');
+
+  function count(value: number): string {
+    return numberFormat.format(value);
+  }
+
   const sampleLine = $derived(
     storedCount > summary.matchCount
       ? `From your last ${summary.matchCount} ranked matches (${storedCount} on record).`
       : `From your ${summary.matchCount} ranked matches on record.`,
   );
 
-  function lobbyValue(stat: LobbyStat): number | null {
-    return benchmarks?.[stat] ?? null;
+  const playtime = $derived(
+    summary.playtimeMs === null
+      ? null
+      : `${Math.round(summary.playtimeMs / 3_600_000)}h playtime`,
+  );
+
+  const ring = $derived.by(() => {
+    const total = Math.max(summary.matchCount, 1);
+    const win = (summary.wins / total) * RING_LENGTH;
+    const loss = (summary.losses / total) * RING_LENGTH;
+    return { win, loss };
+  });
+
+  const recordLabel = $derived(
+    `Won ${formatStat(summary.winRate, STAT_DEFINITIONS.winRate)}: ${summary.wins} wins, ${summary.losses} losses${summary.draws > 0 ? `, ${summary.draws} draws` : ''}`,
+  );
+
+  // Most telling first: overall impact, then damage, consistency and trading kills.
+  const headlines = $derived<Headline[]>([
+    {
+      stat: 'averageCombatScore',
+      label: null,
+      value: summary.averageCombatScore,
+      lobby: benchmarks?.averageCombatScore ?? null,
+    },
+    {
+      stat: 'averageDamagePerRound',
+      label: 'Damage/Round',
+      value: summary.averageDamagePerRound,
+      lobby: benchmarks?.averageDamagePerRound ?? null,
+    },
+    {
+      stat: 'kast',
+      label: null,
+      value: summary.kast,
+      lobby: benchmarks?.kast ?? null,
+    },
+    {
+      stat: 'killDeathRatio',
+      label: 'K/D Ratio',
+      value: summary.killDeathRatio,
+      lobby: benchmarks?.killDeathRatio ?? null,
+    },
+  ]);
+
+  /** Colours a stat that has no lobby average by which side of even it falls. */
+  function versusEven(
+    value: number,
+    even: number,
+    margin: number,
+    text: string,
+  ): LobbyGap {
+    const tone =
+      value >= even + margin ? 'good' : value <= even - margin ? 'bad' : 'even';
+    return { text, tone };
   }
 
-  function count(value: number | null): string {
-    return value === null ? '—' : String(value);
-  }
-
-  const secondaryStats = $derived.by((): SecondaryStat[] => {
-    const acs = STAT_DEFINITIONS.averageCombatScore;
-    const acsLobby = lobbyValue('averageCombatScore');
+  // What wins and loses fights, in order of how much it explains.
+  const smallStats = $derived.by((): SmallStat[] => {
+    const { firstBloods, firstDeaths, damageDeltaPerRound, tradedDeathRate } =
+      summary;
     const traded = STAT_DEFINITIONS.tradedDeathRate;
-    const tradedLobby = benchmarks?.tradedDeathRate ?? null;
+    const headshots = STAT_DEFINITIONS.headshotPercentage;
+    const duelRatio =
+      firstBloods === null || firstDeaths === null || firstDeaths === 0
+        ? null
+        : firstBloods / firstDeaths;
 
     return [
       {
-        key: 'averageCombatScore',
-        label: acs.label,
-        title: acs.description,
-        value: formatStat(summary.averageCombatScore, acs),
+        key: 'firstDuels',
+        label: 'First kills per first death',
+        value: duelRatio === null ? '—' : duelRatio.toFixed(2),
         gap:
-          acsLobby === null
+          duelRatio === null || firstBloods === null || firstDeaths === null
             ? null
-            : lobbyGap(summary.averageCombatScore, acsLobby, acs),
-        note: null,
+            : versusEven(
+                duelRatio,
+                1,
+                0.05,
+                `${firstBloods} kills, ${firstDeaths} deaths`,
+              ),
       },
       {
-        key: 'damageDeltaPerRound',
-        label: STAT_DEFINITIONS.damageDeltaPerRound.label,
-        title: null,
+        key: 'damageDelta',
+        label: 'Damage delta per round',
         value:
-          summary.damageDeltaPerRound === null
+          damageDeltaPerRound === null
             ? '—'
             : formatStat(
-                summary.damageDeltaPerRound,
+                damageDeltaPerRound,
                 STAT_DEFINITIONS.damageDeltaPerRound,
               ),
-        gap: null,
-        note: 'Dealt minus taken, per round',
-      },
-      {
-        key: 'tradedDeathRate',
-        label: traded.label,
-        title: null,
-        value:
-          summary.tradedDeathRate === null
-            ? '—'
-            : formatStat(summary.tradedDeathRate, traded),
         gap:
-          summary.tradedDeathRate !== null && tradedLobby !== null
-            ? lobbyGap(summary.tradedDeathRate, tradedLobby, traded)
-            : null,
-        note: null,
-      },
-      {
-        key: 'kda',
-        label: 'K/D/A',
-        title: 'Kills, deaths and assists',
-        value: `${summary.averageKills} / ${summary.averageDeaths} / ${summary.averageAssists}`,
-        gap: null,
-        note: 'Average per match',
-      },
-      {
-        key: 'firstKills',
-        label: 'First kills',
-        title: null,
-        value: count(summary.firstBloods),
-        gap: null,
-        note:
-          summary.firstBloodRoundWinRate === null
+          damageDeltaPerRound === null
             ? null
-            : `${summary.firstBloodRoundWinRate}% of those rounds won`,
+            : versusEven(damageDeltaPerRound, 0, 5, 'Damage dealt minus taken'),
       },
       {
-        key: 'firstDeaths',
-        label: 'First deaths',
-        title: null,
-        value: count(summary.firstDeaths),
-        gap: null,
-        note:
-          summary.firstDeathRoundWinRate === null
-            ? null
-            : `${summary.firstDeathRoundWinRate}% of those rounds won`,
-      },
-      {
-        key: 'multiKills',
-        label: 'Multi-kill rounds',
-        title: null,
-        value: count(summary.multiKills),
-        gap: null,
-        note: 'Three or more kills',
-      },
-      {
-        key: 'placement',
-        label: 'Average placement',
-        title: null,
+        key: 'traded',
+        label: traded.label,
         value:
-          summary.averagePlacement === null
-            ? '—'
-            : summary.averagePlacement.toFixed(1),
-        gap: null,
-        note: 'Of 10, by ACS',
+          tradedDeathRate === null ? '—' : formatStat(tradedDeathRate, traded),
+        gap:
+          tradedDeathRate !== null && benchmarks?.tradedDeathRate != null
+            ? lobbyGap(tradedDeathRate, benchmarks.tradedDeathRate, traded)
+            : null,
+      },
+      {
+        key: 'headshots',
+        label: 'Headshot %',
+        value: formatStat(summary.headshotPercentage, headshots),
+        gap:
+          benchmarks === null
+            ? null
+            : lobbyGap(
+                summary.headshotPercentage,
+                benchmarks.headshotPercentage,
+                headshots,
+              ),
       },
     ];
   });
 </script>
 
-<div class="overview panel">
-  <div class="record">
-    <p class="win-rate">
-      <span class="stat-label">{STAT_DEFINITIONS.winRate.label}</span>
-      <strong class="display-number">
-        {formatStat(summary.winRate, STAT_DEFINITIONS.winRate)}
-      </strong>
+<div class="overview-column">
+  <div class="overview-heading">
+    <h3 class="column-title">Competitive overview</h3>
+    <p class="overview-meta">
+      {#if playtime}{playtime} <span aria-hidden="true">//</span>{/if}
+      {summary.matchCount} matches
     </p>
-    <div class="split">
-      <!-- The bar repeats the counts beside it, so it is hidden from readers. -->
-      <div class="bar" aria-hidden="true">
-        {#each record as part (part.key)}
-          <span class={part.key} style:flex-grow={part.count}></span>
-        {/each}
-      </div>
-      <ul class="counts">
-        {#each record as part (part.key)}
-          <li>
-            <span class="dot {part.key}" aria-hidden="true"></span>
-            {part.count}<abbr title={part.name}>{part.label}</abbr>
-          </li>
-        {/each}
-      </ul>
-    </div>
   </div>
 
-  <dl class="headline-grid">
-    {#each HEADLINE_STATS as stat (stat)}
-      <HeadlineStat
-        {stat}
-        value={summary[stat]}
-        lobbyValue={lobbyValue(stat)}
-      />
-    {/each}
-  </dl>
-
-  <dl class="secondary-grid">
-    {#each secondaryStats as stat (stat.key)}
-      <div>
-        <dt class="stat-label">
-          {#if stat.title}
-            <abbr title={stat.title}>{stat.label}</abbr>
-          {:else}
-            {stat.label}
-          {/if}
-        </dt>
-        <dd>
-          <span class="value">{stat.value}</span>
-          {#if stat.gap}
-            <small
-              class:tone-good={stat.gap.tone === 'good'}
-              class:tone-bad={stat.gap.tone === 'bad'}>{stat.gap.text}</small
-            >
-          {:else if stat.note}
-            <small>{stat.note}</small>
-          {/if}
-        </dd>
+  <div class="overview panel">
+    <div class="top-row">
+      {#if level !== null}
+        <p class="level">
+          <span>Level</span>
+          <strong class="display-number">{count(level)}</strong>
+        </p>
+      {/if}
+      <div class="record-ring" role="img" aria-label={recordLabel}>
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="record-ring-track" cx="50" cy="50" r={RING_RADIUS} />
+          <circle
+            class="record-ring-loss"
+            cx="50"
+            cy="50"
+            r={RING_RADIUS}
+            stroke-dasharray="{ring.loss} {RING_LENGTH}"
+            stroke-dashoffset={-ring.win}
+          />
+          <circle
+            class="record-ring-win"
+            cx="50"
+            cy="50"
+            r={RING_RADIUS}
+            stroke-dasharray="{ring.win} {RING_LENGTH}"
+          />
+        </svg>
+        <span class="record-ring-text" aria-hidden="true">
+          <strong
+            >{formatStat(summary.winRate, STAT_DEFINITIONS.winRate)}</strong
+          >
+          <span>{summary.wins}W {summary.losses}L</span>
+        </span>
       </div>
-    {/each}
-  </dl>
+      {#if rating}
+        <div class="top-rating">
+          <RatingSummary {rating} />
+        </div>
+      {/if}
+    </div>
+
+    <dl class="headline-grid">
+      {#each headlines as headline (headline.stat)}
+        <HeadlineStat
+          stat={headline.stat}
+          label={headline.label}
+          value={headline.value}
+          lobbyValue={headline.lobby}
+        />
+      {/each}
+    </dl>
+
+    <dl class="small-grid">
+      {#each smallStats as stat (stat.key)}
+        <div
+          class="small-stat"
+          class:has-bar={stat.gap !== null}
+          class:tone-good={stat.gap?.tone === 'good'}
+          class:tone-bad={stat.gap?.tone === 'bad'}
+        >
+          <dt>{stat.label}</dt>
+          <dd>
+            <span class="value">{stat.value}</span>
+            {#if stat.gap}
+              <small>{stat.gap.text}</small>
+            {/if}
+          </dd>
+        </div>
+      {/each}
+    </dl>
+  </div>
+
+  <p class="hint">
+    {sampleLine}
+    {#if benchmarks}
+      "Your lobby" is the average of the other nine players in those matches.
+    {/if}
+    KAST: {STAT_DEFINITIONS.kast.description}
+    Traded deaths: {STAT_DEFINITIONS.tradedDeathRate.description}
+  </p>
 </div>
 
-<p class="hint">
-  {sampleLine}
-  {#if benchmarks}
-    "Your lobby" is the average of the other nine players in those matches.
-  {/if}
-  KAST: {STAT_DEFINITIONS.kast.description}
-</p>
-
 <style>
+  p,
   dl,
   dd {
     margin: 0;
+  }
+
+  .column-title {
+    margin: 0 0 var(--space-3);
+    color: var(--val-cream);
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+
+  /* Competitive overview */
+  .overview-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 var(--space-4);
+  }
+
+  .overview-meta {
+    margin-bottom: var(--space-3);
+    color: var(--val-muted);
+    font-size: var(--text-sm);
+    font-weight: 500;
   }
 
   .overview {
@@ -243,83 +307,85 @@
     padding: var(--space-5);
   }
 
-  .record {
+  .top-row {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-4) var(--space-6);
   }
 
-  .win-rate {
-    display: grid;
-    gap: var(--space-2);
-    margin: 0;
-  }
-
-  .win-rate strong {
+  .level strong {
     font-size: var(--text-display-sm);
   }
 
-  .split {
+  .top-rating {
+    margin-left: auto;
+  }
+
+  .level {
     display: grid;
-    min-width: min(100%, 14rem);
-    flex: 1;
-    gap: var(--space-2);
+    gap: var(--space-1);
   }
 
-  /* Segments sized by count, with a gap of panel colour between them. */
-  .bar {
-    display: flex;
-    height: 0.5rem;
-    gap: 2px;
-  }
-
-  .bar span {
-    min-width: 0.25rem;
-    flex-basis: 0;
-    border-radius: 2px;
-  }
-
-  .win {
-    background: var(--val-win);
-  }
-
-  .loss {
-    background: var(--val-loss);
-  }
-
-  .draw {
-    background: var(--val-line-strong);
-  }
-
-  .counts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-1) var(--space-4);
-    margin: 0;
-    padding: 0;
-    color: var(--val-cream);
-    font-size: var(--text-sm);
+  .level span {
+    color: var(--val-muted);
+    font-size: var(--text-lg);
     font-weight: 500;
+  }
+
+  .record-ring {
+    position: relative;
+    width: 6rem;
+    height: 6rem;
+    flex-shrink: 0;
+  }
+
+  .record-ring svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+  }
+
+  .record-ring circle {
+    fill: none;
+    stroke-width: 7;
+  }
+
+  .record-ring-track {
+    stroke: var(--val-line-strong);
+  }
+
+  .record-ring-win {
+    stroke: var(--val-win);
+  }
+
+  .record-ring-loss {
+    stroke: var(--val-loss);
+  }
+
+  .record-ring-text {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    color: var(--val-cream);
+    font-family: var(--font-display);
+    font-size: var(--text-md);
+    font-weight: 500;
+    line-height: 1.15;
+    text-align: center;
     font-variant-numeric: tabular-nums;
-    list-style: none;
   }
 
-  .counts li {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
+  .record-ring-text strong {
+    font-size: var(--text-xl);
+    font-weight: 600;
   }
 
-  .counts abbr {
-    margin-left: calc(-1 * var(--space-1));
+  .record-ring-text span {
     color: var(--val-faint);
-  }
-
-  .dot {
-    width: 0.5rem;
-    height: 0.5rem;
-    border-radius: 50%;
+    font-family: var(--font-body);
+    font-size: var(--text-xs);
   }
 
   .headline-grid {
@@ -328,54 +394,90 @@
     gap: var(--space-3);
   }
 
-  .secondary-grid {
+  .small-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: var(--space-5) var(--space-3);
-    padding: 0 var(--space-4) var(--space-1);
+    padding: 0 var(--space-1);
   }
 
-  .secondary-grid > div {
+  .small-stat {
+    --bar: var(--val-line-strong);
+    position: relative;
     display: grid;
     align-content: start;
     gap: var(--space-1);
+    padding-left: var(--space-4);
   }
 
-  .secondary-grid dd {
+  .small-stat.has-bar::before {
+    position: absolute;
+    top: 0.2rem;
+    bottom: 0.2rem;
+    left: 0;
+    width: 3px;
+    border-radius: 2px;
+    background: var(--bar);
+    content: '';
+  }
+
+  .small-stat.tone-good {
+    --bar: var(--val-win);
+  }
+
+  .small-stat.tone-bad {
+    --bar: var(--val-loss);
+  }
+
+  .small-stat dt {
+    color: var(--val-muted);
+    font-size: var(--text-sm);
+    font-weight: 500;
+  }
+
+  .small-stat dd {
     display: grid;
     gap: var(--space-1);
   }
 
   .value {
-    font-size: var(--text-lg);
-    font-weight: 600;
+    color: var(--val-cream);
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
+    font-weight: 500;
+    line-height: 1.1;
     font-variant-numeric: tabular-nums;
   }
 
   small {
     color: var(--val-faint);
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
     font-variant-numeric: tabular-nums;
   }
 
-  small.tone-good {
+  .tone-good small {
     color: var(--val-win);
   }
 
-  small.tone-bad {
+  .tone-bad small {
     color: var(--val-loss);
   }
 
   .hint {
     max-width: 48rem;
-    margin: var(--space-3) 0 0;
+    margin-top: var(--space-3);
     color: var(--val-faint);
     font-size: var(--text-sm);
   }
 
   @media (max-width: 760px) {
+    .top-rating {
+      flex-basis: 100%;
+      margin-left: 0;
+    }
+
     .headline-grid,
-    .secondary-grid {
+    .small-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
@@ -385,8 +487,8 @@
       padding: var(--space-4);
     }
 
-    .secondary-grid {
-      padding-inline: var(--space-3);
+    .level strong {
+      font-size: var(--text-2xl);
     }
   }
 </style>

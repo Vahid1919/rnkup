@@ -44,6 +44,15 @@ export { RELIABLE_SAMPLE_MATCHES } from './breakdowns';
 export { STAT_DEFINITIONS } from './stats';
 export { summarizeMatchForPlayer } from './match-summary';
 export {
+  availableRatingRanges,
+  DEFAULT_RATING_RANGE,
+  ratingChange,
+  ratingPointsInRange,
+  RATING_RANGES,
+  type RatingRange,
+  type RatingRangeOption,
+} from './rating-range';
+export {
   buildMatchTakeaways,
   MINIMUM_COACHING_MATCHES,
   type Insight,

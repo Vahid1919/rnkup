@@ -46,7 +46,7 @@
 </script>
 
 <svelte:head>
-  <title>{profile.riotId.name}#{profile.riotId.tag} | Radiant Stats</title>
+  <title>{profile.riotId.name}#{profile.riotId.tag} | RNKUP</title>
   <meta
     name="description"
     content="Ranked Valorant stats, trends and coaching for {profile.riotId
@@ -56,7 +56,11 @@
 
 <Nav />
 <main id="main-content" class="page" tabindex="-1">
-  <PlayerHeader {profile} rating={dashboard.rating} />
+  <PlayerHeader
+    {profile}
+    rating={dashboard.rating}
+    showRank={!hasDetailedMatches}
+  />
 
   {#if dashboard.matchLog.length === 0}
     <section class="empty panel page-section" aria-labelledby="empty-title">
@@ -69,19 +73,19 @@
   {:else}
     {#if hasDetailedMatches}
       <section id="stats" class="stats" aria-labelledby="stats-title">
-        <div class="section-heading">
-          <h2 id="stats-title" class="section-title">Stats</h2>
-        </div>
+        <h2 id="stats-title" class="sr-only">Stats</h2>
         <FormSection
           {summary}
           benchmarks={dashboard.benchmarks}
+          rating={dashboard.rating}
+          level={profile.accountLevel}
           storedCount={dashboard.matchLog.length}
         />
         <TrendsSection ratingHistory={dashboard.ratingHistory} />
-        <BreakdownSection {dashboard} />
       </section>
 
       <FocusSection {summary} insights={dashboard.insights} />
+      <BreakdownSection {dashboard} />
     {/if}
 
     <MatchesSection

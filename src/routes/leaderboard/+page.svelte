@@ -37,7 +37,7 @@
 </script>
 
 <svelte:head>
-  <title>{regionLabel} leaderboard | Radiant Stats</title>
+  <title>{regionLabel} leaderboard | RNKUP</title>
   <meta
     name="description"
     content="The Radiant and Immortal competitive leaderboard for {regionLabel}."

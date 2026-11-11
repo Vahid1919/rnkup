@@ -95,34 +95,39 @@
   </div>
 {/snippet}
 
-<div class="breakdown-grid">
-  {@render breakdownTable(
-    'agents-title',
-    'Agents',
-    'Agent',
-    'agents',
-    dashboard.breakdowns.agents,
-    true,
-    showAllAgents,
-    () => (showAllAgents = !showAllAgents),
-  )}
-  {@render breakdownTable(
-    'maps-title',
-    'Maps',
-    'Map',
-    'maps',
-    dashboard.breakdowns.maps,
-    false,
-    showAllMaps,
-    () => (showAllMaps = !showAllMaps),
-  )}
-</div>
-{#if hasSmallSample}
-  <p class="sample-note">
-    Faded win rates come from fewer than {SMALL_SAMPLE} matches, so do not read much
-    into them.
-  </p>
-{/if}
+<section id="breakdown" class="page-section" aria-labelledby="breakdown-title">
+  <div class="section-heading">
+    <h2 id="breakdown-title" class="section-title">Agents and maps</h2>
+  </div>
+  <div class="breakdown-grid">
+    {@render breakdownTable(
+      'agents-title',
+      'Agents',
+      'Agent',
+      'agents',
+      dashboard.breakdowns.agents,
+      true,
+      showAllAgents,
+      () => (showAllAgents = !showAllAgents),
+    )}
+    {@render breakdownTable(
+      'maps-title',
+      'Maps',
+      'Map',
+      'maps',
+      dashboard.breakdowns.maps,
+      false,
+      showAllMaps,
+      () => (showAllMaps = !showAllMaps),
+    )}
+  </div>
+  {#if hasSmallSample}
+    <p class="sample-note">
+      Faded win rates come from fewer than {SMALL_SAMPLE} matches, so do not read
+      much into them.
+    </p>
+  {/if}
+</section>
 
 <style>
   .breakdown-grid {

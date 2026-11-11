@@ -151,6 +151,7 @@ export function summarizeCompetitiveMatches(
         ? null
         : percentage(totals.tradedDeaths, totals.tradeTrackedDeaths),
     multiKills: sumNullable(matches, (match) => match.stats.multiKills),
+    playtimeMs: sumNullable(matches, (match) => match.durationMs),
     averagePlacement:
       totals.placementMatches === 0
         ? null

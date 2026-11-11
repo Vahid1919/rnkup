@@ -1,4 +1,4 @@
-# Radiant Stats
+# RNKUP
 
 A SvelteKit app that turns a Valorant player's recent competitive matches into
 stats measured against their lobbies, coaching on what to fix first, and a
@@ -58,6 +58,10 @@ The key is read only by server code. Do not prefix it with `PUBLIC_` or commit
   has stored.
 - KAST, first kills and deaths, and trades come from the round-by-round kill
   feed, and are empty for matches without it.
+- The match page's round replay, kills and deaths map, and economy use the
+  positions and loadouts recorded at each kill, plant and defuse. Positions
+  are still frames, not movement, and only maps listed in `src/lib/maps.ts`
+  get a minimap.
 - Results are cached in memory for 15 minutes per player.
 - The leaderboard is the PC board for one region, 50 players per page,
   filtered with `?region=eu&tier=radiant|immortal&page=1`. Only Immortal and

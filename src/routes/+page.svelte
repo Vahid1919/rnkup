@@ -4,7 +4,7 @@
 </script>
 
 <svelte:head>
-  <title>Radiant Stats</title>
+  <title>RNKUP</title>
   <meta
     name="description"
     content="Your Valorant ranked stats and what to fix first."
