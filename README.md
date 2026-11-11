@@ -53,7 +53,10 @@ The key is read only by server code. Do not prefix it with `PUBLIC_` or commit
 ## Data limits
 
 - Stats, trends and coaching use up to **100 detailed matches**, loaded 10 per
-  request. The match log also lists up to 500 lighter stored matches.
+  request with all ten requests sent at once. The match log also lists up to
+  500 lighter stored matches.
+- The player page shows the profile first and streams in the stats once the
+  matches have loaded.
 - Neither is a player's full career history; the provider only keeps what it
   has stored.
 - KAST, first kills and deaths, and trades come from the round-by-round kill

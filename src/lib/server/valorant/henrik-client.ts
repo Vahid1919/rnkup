@@ -185,14 +185,27 @@ type DetailedHistory = {
   complete: boolean;
 };
 
-async function fetchDetailedHistory(
+type HistoryLane = {
+  matches: MatchDetail[];
+  /** Set when a request in this lane failed; `matches` holds what loaded. */
+  error: unknown;
+};
+
+/**
+ * Loads one ten-match slot of the detailed history, starting at `laneStart`.
+ * The provider can return a short page, so the lane advances by the number
+ * of matches actually returned until it has covered its slot.
+ */
+async function fetchHistoryLane(
   profile: PlayerProfile,
+  laneStart: number,
   fetchFn: typeof fetch,
   apiKey: string,
-): Promise<DetailedHistory> {
-  const matches = new Map<string, MatchDetail>();
+): Promise<HistoryLane> {
+  const matches: MatchDetail[] = [];
+  const laneEnd = laneStart + COMPETITIVE_MATCH_PAGE_SIZE;
 
-  for (let start = 0; start < COMPETITIVE_MATCH_LIMIT; ) {
+  for (let start = laneStart; start < laneEnd; ) {
     const url = new URL(
       `/valorant/v4/matches/${encodeURIComponent(profile.region.toLowerCase())}/pc/${playerPath(profile)}`,
       HENRIK_API_URL,
@@ -201,33 +214,66 @@ async function fetchDetailedHistory(
     url.searchParams.set('size', String(COMPETITIVE_MATCH_PAGE_SIZE));
     url.searchParams.set('start', String(start));
 
-    let result: HenrikResult;
     try {
-      result = await requestHenrik(
+      const result = await requestHenrik(
         url,
         fetchFn,
         apiKey,
         'HenrikDev could not retrieve competitive matches.',
       );
+      if (!result.found) break;
+
+      const page = parseMatchPage(result.body);
+      matches.push(...page.matches);
+      if (page.returnedMatchCount === 0) break;
+      start += page.returnedMatchCount;
     } catch (error) {
-      // Keep what already loaded rather than failing the whole dashboard.
-      if (matches.size > 0) {
-        return { matches: [...matches.values()], complete: false };
-      }
-      throw error;
+      return { matches, error };
     }
+  }
 
-    if (!result.found) break;
+  return { matches, error: null };
+}
 
-    const page = parseMatchPage(result.body);
-    for (const match of page.matches) {
+/**
+ * Requests every ten-match slot at once instead of one page after another,
+ * then joins the slots in order. Short pages make neighbouring slots overlap,
+ * so matches are de-duplicated by ID.
+ */
+async function fetchDetailedHistory(
+  profile: PlayerProfile,
+  fetchFn: typeof fetch,
+  apiKey: string,
+): Promise<DetailedHistory> {
+  const laneCount = Math.ceil(
+    COMPETITIVE_MATCH_LIMIT / COMPETITIVE_MATCH_PAGE_SIZE,
+  );
+  const lanes = await Promise.all(
+    Array.from({ length: laneCount }, (_, index) =>
+      fetchHistoryLane(
+        profile,
+        index * COMPETITIVE_MATCH_PAGE_SIZE,
+        fetchFn,
+        apiKey,
+      ),
+    ),
+  );
+
+  const matches = new Map<string, MatchDetail>();
+  for (const lane of lanes) {
+    for (const match of lane.matches) {
       if (matches.size < COMPETITIVE_MATCH_LIMIT) {
         matches.set(match.id, match);
       }
     }
-    if (page.returnedMatchCount === 0) break;
-
-    start += page.returnedMatchCount;
+    if (lane.error !== null) {
+      // Keep the unbroken run of recent matches rather than failing the
+      // whole dashboard; later lanes would leave a gap, so they are dropped.
+      if (matches.size > 0) {
+        return { matches: [...matches.values()], complete: false };
+      }
+      throw lane.error;
+    }
   }
 
   return { matches: [...matches.values()], complete: true };

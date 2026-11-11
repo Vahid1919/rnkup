@@ -89,16 +89,22 @@ static/images/                  Agent and app images
 
 ### Loading the player dashboard
 
-1. `players/[name]/[tag]/+page.server.ts` calls `fetchPlayerDashboard()`.
-2. The adapter loads, in parallel: up to 100 detailed matches (10 per
-   request), up to 500 stored matches, the current rating, and rating history
-   (see ADR 0003). Only the detailed matches are required; the others fall
-   back to empty.
+1. `players/[name]/[tag]/+page.server.ts` returns a cached dashboard straight
+   away. Otherwise it awaits only `fetchPlayerProfile()` (so bad or unknown
+   Riot IDs still get a 400/404) and returns `fetchPlayerDashboard()` as a
+   streamed promise (see ADR 0006).
+2. The adapter loads, in parallel: up to 100 detailed matches, up to 500
+   stored matches, the current rating, and rating history (see ADR 0003).
+   The detailed matches are ten 10-match pages requested at once; a short
+   page is continued within its slot and overlaps are de-duplicated. Only the
+   detailed matches are required; the others fall back to empty.
 3. Each detailed match is reduced to the player's line with
    `summarizeMatchForPlayer()`, then `buildPlayerDashboard()` calculates
    everything the page shows.
-4. The result is cached for 15 minutes and returned as `data.dashboard`.
-5. `+page.svelte` composes the section components in `components/player/`.
+4. The result is cached for 15 minutes and resolves `data.dashboard` to
+   `{ ok: true, dashboard }`, or `{ ok: false, message }` on failure.
+5. `+page.svelte` shows the header and a loading panel, then composes the
+   section components in `components/player/` inside `{#await}`.
 
 ### Opening a match
 

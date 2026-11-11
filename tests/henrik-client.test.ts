@@ -153,20 +153,45 @@ describe('fetchPlayerProfile', () => {
   });
 });
 
+function matchesPage(ids: string[]) {
+  return {
+    ...competitiveMatchResponse,
+    data: ids.map((id) => ({
+      ...competitiveMatchResponse.data[0],
+      metadata: { ...competitiveMatchResponse.data[0].metadata, match_id: id },
+    })),
+  };
+}
+
+function matchIds(from: number, count: number): string[] {
+  return Array.from({ length: count }, (_, index) => `match-${from + index}`);
+}
+
+/** Answers each history request by its `start`; unknown starts are empty. */
+function historyFetch(pages: Record<number, unknown>) {
+  return vi.fn<typeof fetch>((input) => {
+    const start = Number(new URL(String(input)).searchParams.get('start'));
+    const body = pages[start];
+    if (body === 'error') {
+      return Promise.resolve(new Response(null, { status: 500 }));
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify(body ?? emptyCompetitiveMatchResponse), {
+        status: 200,
+      }),
+    );
+  });
+}
+
+function requestedStarts(fetchFn: ReturnType<typeof historyFetch>): number[] {
+  return fetchFn.mock.calls
+    .map(([input]) => Number(new URL(String(input)).searchParams.get('start')))
+    .sort((first, second) => first - second);
+}
+
 describe('fetchCompetitiveMatches', () => {
   it('requests the first detailed history page and maps player metrics', async () => {
-    const fetchFn = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(competitiveMatchResponse), {
-          status: 200,
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(emptyCompetitiveMatchResponse), {
-          status: 200,
-        }),
-      );
+    const fetchFn = historyFetch({ 0: competitiveMatchResponse });
 
     await expect(
       fetchCompetitiveMatches(playerProfile, fetchFn, 'test-api-key'),
@@ -200,49 +225,46 @@ describe('fetchCompetitiveMatches', () => {
     );
   });
 
-  it('paginates detailed history in ten-match pages', async () => {
-    const fullPage = {
-      ...competitiveMatchResponse,
-      data: Array.from({ length: 10 }, (_, index) => ({
-        ...competitiveMatchResponse.data[0],
-        metadata: {
-          ...competitiveMatchResponse.data[0].metadata,
-          match_id: `match-${index}`,
-        },
-      })),
-    };
-    const finalPage = {
-      ...competitiveMatchResponse,
-      data: [
-        {
-          ...competitiveMatchResponse.data[0],
-          metadata: {
-            ...competitiveMatchResponse.data[0].metadata,
-            match_id: 'match-10',
-          },
-        },
-      ],
-    };
-    const fetchFn = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(fullPage), { status: 200 }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(finalPage), { status: 200 }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(emptyCompetitiveMatchResponse), {
-          status: 200,
+  it('requests every ten-match page at once', async () => {
+    const pending: (() => void)[] = [];
+    const fetchFn = vi.fn<typeof fetch>(
+      () =>
+        new Promise((resolve) => {
+          pending.push(() =>
+            resolve(
+              new Response(JSON.stringify(emptyCompetitiveMatchResponse), {
+                status: 200,
+              }),
+            ),
+          );
         }),
-      );
+    );
 
-    await expect(
-      fetchCompetitiveMatches(playerProfile, fetchFn, 'test-api-key'),
-    ).resolves.toHaveLength(11);
+    const history = fetchCompetitiveMatches(
+      playerProfile,
+      fetchFn,
+      'test-api-key',
+    );
+    // No response has arrived yet, so every page must already be requested.
+    expect(fetchFn).toHaveBeenCalledTimes(10);
+    for (const release of pending) release();
+    await expect(history).resolves.toEqual([]);
+  });
 
-    expect(fetchFn).toHaveBeenNthCalledWith(
-      2,
+  it('joins ten-match pages in order', async () => {
+    const fetchFn = historyFetch({
+      0: matchesPage(matchIds(0, 10)),
+      10: matchesPage(['match-10']),
+    });
+
+    const matches = await fetchCompetitiveMatches(
+      playerProfile,
+      fetchFn,
+      'test-api-key',
+    );
+
+    expect(matches.map((match) => match.id)).toEqual(matchIds(0, 11));
+    expect(fetchFn).toHaveBeenCalledWith(
       expect.objectContaining({
         href: 'https://api.henrikdev.xyz/valorant/v4/matches/eu/pc/Player%20Name/EUW?mode=competitive&size=10&start=10',
       }),
@@ -251,52 +273,50 @@ describe('fetchCompetitiveMatches', () => {
   });
 
   it('continues after a short nonempty history page', async () => {
-    const shortPage = {
-      ...competitiveMatchResponse,
-      data: Array.from({ length: 5 }, (_, index) => ({
-        ...competitiveMatchResponse.data[0],
-        metadata: {
-          ...competitiveMatchResponse.data[0].metadata,
-          match_id: `match-${index}`,
-        },
-      })),
-    };
-    const finalPage = {
-      ...competitiveMatchResponse,
-      data: [
-        {
-          ...competitiveMatchResponse.data[0],
-          metadata: {
-            ...competitiveMatchResponse.data[0].metadata,
-            match_id: 'match-5',
-          },
-        },
-      ],
-    };
-    const fetchFn = vi
-      .fn<typeof fetch>()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(shortPage), { status: 200 }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(finalPage), { status: 200 }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(emptyCompetitiveMatchResponse), {
-          status: 200,
-        }),
-      );
+    const fetchFn = historyFetch({
+      0: matchesPage(matchIds(0, 5)),
+      5: matchesPage(matchIds(5, 10)),
+      10: matchesPage(matchIds(10, 3)),
+    });
+
+    const matches = await fetchCompetitiveMatches(
+      playerProfile,
+      fetchFn,
+      'test-api-key',
+    );
+
+    // The page at 5 overlaps the page at 10; each match appears once.
+    expect(matches.map((match) => match.id)).toEqual(matchIds(0, 15));
+    expect(requestedStarts(fetchFn)).toContain(5);
+  });
+
+  it('keeps the matches before a failed page and drops the ones after it', async () => {
+    const fetchFn = historyFetch({
+      0: matchesPage(matchIds(0, 10)),
+      10: 'error',
+      20: matchesPage(matchIds(20, 10)),
+    });
+
+    const matches = await fetchCompetitiveMatches(
+      playerProfile,
+      fetchFn,
+      'test-api-key',
+    );
+
+    expect(matches.map((match) => match.id)).toEqual(matchIds(0, 10));
+  });
+
+  it('fails when the most recent page fails', async () => {
+    const fetchFn = historyFetch({
+      0: 'error',
+      10: matchesPage(matchIds(10, 10)),
+    });
 
     await expect(
       fetchCompetitiveMatches(playerProfile, fetchFn, 'test-api-key'),
-    ).resolves.toHaveLength(6);
-    expect(fetchFn).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        href: 'https://api.henrikdev.xyz/valorant/v4/matches/eu/pc/Player%20Name/EUW?mode=competitive&size=10&start=5',
-      }),
-      { headers: { Authorization: 'test-api-key' } },
-    );
+    ).rejects.toMatchObject({
+      kind: 'upstream',
+    } satisfies Partial<PlayerLookupError>);
   });
 });
 
@@ -304,18 +324,10 @@ describe('fetchCompetitiveMatches limit', () => {
   it('stops after one hundred detailed matches', async () => {
     const fetchFn = vi.fn<typeof fetch>((input) => {
       const start = Number(new URL(String(input)).searchParams.get('start'));
-      const page = {
-        ...competitiveMatchResponse,
-        data: Array.from({ length: 10 }, (_, index) => ({
-          ...competitiveMatchResponse.data[0],
-          metadata: {
-            ...competitiveMatchResponse.data[0].metadata,
-            match_id: `match-${start + index}`,
-          },
-        })),
-      };
       return Promise.resolve(
-        new Response(JSON.stringify(page), { status: 200 }),
+        new Response(JSON.stringify(matchesPage(matchIds(start, 10))), {
+          status: 200,
+        }),
       );
     });
 

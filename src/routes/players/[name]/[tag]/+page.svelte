@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import type { Snapshot } from '@sveltejs/kit';
   import {
     defaultHistoryView,
@@ -12,14 +13,12 @@
   import MatchesSection from '$lib/components/player/MatchesSection.svelte';
   import PlayerHeader from '$lib/components/player/PlayerHeader.svelte';
   import TrendsSection from '$lib/components/player/TrendsSection.svelte';
+  import type { PlayerDashboard } from '$lib/dashboard';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
 
-  const dashboard = $derived(data.dashboard);
-  const profile = $derived(dashboard.profile);
-  const summary = $derived(dashboard.summary);
-  const hasDetailedMatches = $derived(summary.matchCount > 0);
+  const profile = $derived(data.profile);
 
   let historyView = $state<MatchHistoryView>(defaultHistoryView());
 
@@ -54,8 +53,9 @@
   />
 </svelte:head>
 
-<Nav />
-<main id="main-content" class="page" tabindex="-1">
+{#snippet stats(dashboard: PlayerDashboard)}
+  {@const summary = dashboard.summary}
+  {@const hasDetailedMatches = summary.matchCount > 0}
   <PlayerHeader
     {profile}
     rating={dashboard.rating}
@@ -63,7 +63,7 @@
   />
 
   {#if dashboard.matchLog.length === 0}
-    <section class="empty panel page-section" aria-labelledby="empty-title">
+    <section class="notice panel page-section" aria-labelledby="empty-title">
       <h2 id="empty-title" class="section-title">No competitive matches yet</h2>
       <p>
         HenrikDev returned no competitive matches for this player. Try another
@@ -95,6 +95,51 @@
       bind:view={historyView}
     />
   {/if}
+{/snippet}
+
+<Nav />
+<main id="main-content" class="page" tabindex="-1">
+  <!-- Cached dashboards arrive ready; new lookups stream in after the profile. -->
+  {#await data.dashboard}
+    <PlayerHeader {profile} rating={null} />
+    <section
+      class="notice panel page-section"
+      role="status"
+      aria-labelledby="loading-title"
+    >
+      <h2 id="loading-title" class="section-title">Loading match history</h2>
+      <p>
+        Analysing up to 100 recent competitive matches. This can take a few
+        seconds.
+      </p>
+    </section>
+  {:then result}
+    {#if result.ok}
+      {@render stats(result.dashboard)}
+    {:else}
+      <PlayerHeader {profile} rating={null} />
+      <section
+        class="notice panel page-section"
+        role="alert"
+        aria-labelledby="failed-title"
+      >
+        <h2 id="failed-title" class="section-title">
+          Match history unavailable
+        </h2>
+        <p>{result.message}</p>
+        <p>
+          <!-- A full reload, since client navigation to the same URL skips the load. -->
+          <a
+            href={resolve('/players/[name]/[tag]', {
+              name: profile.riotId.name,
+              tag: profile.riotId.tag,
+            })}
+            data-sveltekit-reload>Try again</a
+          >
+        </p>
+      </section>
+    {/if}
+  {/await}
 </main>
 
 <style>
@@ -102,11 +147,11 @@
     margin-top: var(--space-7);
   }
 
-  .empty {
+  .notice {
     padding: var(--space-6);
   }
 
-  .empty p {
+  .notice p {
     max-width: 36rem;
     margin: var(--space-2) 0 0;
     color: var(--val-muted);
