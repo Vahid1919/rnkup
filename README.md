@@ -1,99 +1,68 @@
 # Radiant Stats
 
-Radiant Stats is a SvelteKit dashboard for exploring a Valorant player's competitive performance. Enter a Riot ID in the form `NAME#TAG` to view the player's profile, available competitive match history, summary metrics, and performance trends.
+A SvelteKit app that turns a Valorant player's recent competitive matches into
+stats measured against their lobbies, coaching on what to fix first, and a
+detailed page for every match. Data comes from the
+[HenrikDev Valorant API](https://docs.henrikdev.xyz).
+
+**New to the code?** Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for
+the layout, request flow and a suggested reading order. Terms are defined in
+[GLOSSARY.md](GLOSSARY.md), and the reasons behind key decisions are in
+[docs/adr/](docs/adr/).
 
 ## Quick start
 
-### Requirements
-
-- Node.js 20 or newer
-- pnpm
-- A HenrikDev API key
-
-### Install and configure
+Requires Node.js 20+, pnpm, and a HenrikDev API key.
 
 ```bash
 pnpm install
-```
-
-Create `.env.local` in the project root:
-
-```dotenv
-VALORANT_API_KEY=your_henrikdev_api_key
-```
-
-The key is used only by server-side code. Do not prefix it with `PUBLIC_` or commit `.env.local`.
-
-### Run locally
-
-```bash
+echo "VALORANT_API_KEY=your_henrikdev_api_key" > .env.local
 pnpm dev
 ```
 
-Open `http://localhost:5173`, search for a Riot ID, and select the matching player.
+Open http://localhost:5173 and search for a Riot ID such as `Janhoi#VAL`.
 
-## How it works
+The key is read only by server code. Do not prefix it with `PUBLIC_` or commit
+`.env.local`.
 
-1.  The home page validates the `NAME#TAG` input and requests the player's profile through `/api/players/[name]/[tag]`.
-2.  The server-only HenrikDev adapter validates the provider response and maps it to application-owned types.
-3.  The dashboard route loads the profile and competitive match data on the server.
-4.  `buildCompetitivePerformance()` calculates summary metrics and chart data for the page.
+## Scripts
 
-The HenrikDev API key never reaches the browser. Dashboard results are cached in memory for 15 minutes. Competitive history is fetched in pages of 20, up to 100 available matches. The provider's available history is not necessarily a player's complete career history.
-
-## Dashboard data
-
-The player page includes:
-
-- Player profile and account details
-- Win/loss record, win rate, K/D, KDA, ACS, ADR, and headshot percentage
-- Most-played agent and map
-- Match history with map, agent, score, result, and per-match statistics
-- ACS, headshot percentage, KDA, and First Blood Rate trend charts
-
-First Blood Rate is calculated per 100 rounds. The chart also shows a five-match rolling average when enough data is available. Matches without first-blood data are excluded from that calculation.
-
-## Project structure
-
-```text
-src/
-  lib/
-    components/                        Shared Svelte components
-    player-dashboard.ts                 Dashboard types and metric calculations
-    player-profile.ts                   Profile type
-    server/valorant/henrik-client.ts    Server-only HenrikDev adapter
-  routes/
-    +page.svelte                        Search page
-    api/                                Profile and health endpoints
-    players/[name]/[tag]/               Dashboard route
-tests/                                  Vitest tests
-static/images/                         Agent and application images
-```
+| Command             | What it does                        |
+| ------------------- | ----------------------------------- |
+| `pnpm dev`          | Development server with hot reload  |
+| `pnpm check`        | Type-check Svelte and TypeScript    |
+| `pnpm lint`         | ESLint                              |
+| `pnpm format:check` | Prettier check                      |
+| `pnpm test`         | Vitest (provider calls are faked)   |
+| `pnpm test:watch`   | Vitest in watch mode                |
+| `pnpm build`        | Production build (Node adapter)     |
+| `pnpm preview`      | Preview the production build        |
+| `pnpm start`        | Run the built server (`node build`) |
 
 ## Routes
 
-| Route                       | Purpose                                 |
-| --------------------------- | --------------------------------------- |
-| `/`                         | Search for a player                     |
-| `/players/[name]/[tag]`     | Render a player's dashboard             |
-| `/api/players/[name]/[tag]` | Return profile JSON for the search flow |
-| `/api/health`               | Health check                            |
+| Route                                     | Purpose                           |
+| ----------------------------------------- | --------------------------------- |
+| `/`                                       | Search for a player               |
+| `/players/[name]/[tag]`                   | Player dashboard                  |
+| `/players/[name]/[tag]/matches/[matchId]` | One match from that player's view |
+| `/leaderboard`                            | Regional Radiant/Immortal+ board  |
+| `/api/players/[name]/[tag]`               | Profile JSON for the search flow  |
+| `/api/health`                             | Health check                      |
 
-## Validation
+## Data limits
 
-Tests use mocked provider responses and do not call HenrikDev.
+- Stats, trends and coaching use up to **100 detailed matches**, loaded 10 per
+  request. The match log also lists up to 500 lighter stored matches.
+- Neither is a player's full career history; the provider only keeps what it
+  has stored.
+- KAST, first kills and deaths, and trades come from the round-by-round kill
+  feed, and are empty for matches without it.
+- Results are cached in memory for 15 minutes per player.
+- The leaderboard is the PC board for one region, 50 players per page,
+  filtered with `?region=eu&tier=radiant|immortal&page=1`. Only Immortal and
+  Radiant players are on it, and each page is cached for 15 minutes.
+- HenrikDev allows about 30 requests a minute, so loading many new players
+  quickly can return a "try again" error.
 
-```bash
-pnpm check
-pnpm lint
-pnpm format:check
-pnpm test
-pnpm build
-```
-
-Run the development server with `pnpm dev` or preview a production build with:
-
-```bash
-pnpm build
-pnpm preview
-```
+See [ADR 0003](docs/adr/0003-two-kinds-of-match-history.md) for why.
