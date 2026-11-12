@@ -1,21 +1,25 @@
 <script lang="ts">
   import { navigating } from '$app/state';
-  import LoadingBar from '$lib/components/LoadingBar.svelte';
+  import LoadingOverlay from '$lib/components/LoadingOverlay.svelte';
   import '../app.css';
 
   let { children } = $props();
 
+  const targetRoute = $derived(navigating.to?.route.id ?? '');
+
   const loadingLabel = $derived.by(() => {
-    const route = navigating.to?.route.id ?? '';
-    if (route.includes('/matches/')) return 'Loading match…';
-    if (route.startsWith('/players/')) return 'Loading player…';
-    if (route === '/leaderboard') return 'Loading leaderboard…';
-    return 'Loading…';
+    if (targetRoute.includes('/matches/')) return 'Loading match';
+    if (targetRoute.startsWith('/players/')) return 'Loading player';
+    if (targetRoute === '/leaderboard') return 'Loading leaderboard';
+    return 'Loading';
   });
 
-  // The landing search shows its own bar while it validates the Riot ID.
+  // The landing search keeps its own overlay up until the player page opens.
   const showLoading = $derived(
-    navigating.to !== null && navigating.from?.route.id !== '/',
+    navigating.to !== null &&
+      !(
+        navigating.from?.route.id === '/' && targetRoute.startsWith('/players/')
+      ),
   );
 </script>
 
@@ -34,6 +38,7 @@
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
-<LoadingBar active={showLoading} label={loadingLabel} />
+<!-- Quick page changes finish inside the delay and never show the overlay. -->
+<LoadingOverlay active={showLoading} label={loadingLabel} delay={300} />
 
 {@render children()}

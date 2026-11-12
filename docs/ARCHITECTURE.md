@@ -59,13 +59,13 @@ src/
     player-profile.ts           Profile type
     agents.ts, ranks.ts         Static Valorant reference data (roles, images, tiers)
     format.ts                   Number and date formatting for the UI
-    components/                 Shared Svelte components (LoadingBar is the delayed top progress bar)
+    components/                 Shared Svelte components (LoadingOverlay is the full-screen loading spinner)
       player/                   Player page sections (header, focus, form, trends, breakdown, matches)
         insight-stats.ts        Which stat each coaching insight is about (for the KAST explainer)
       match/                    Match page sections (Minimap, RoundReview, MatchMap, EconomyChart)
   routes/
     +page.svelte                Search page
-    +layout.svelte              Global styles, skip link and loading bar
+    +layout.svelte              Global styles, skip link and loading overlay
     +error.svelte               Error page
     leaderboard/                Regional leaderboard (Radiant or Immortal+)
     players/[name]/[tag]/       Player dashboard
