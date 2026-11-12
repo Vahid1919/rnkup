@@ -3,16 +3,13 @@
   import { resolve } from '$app/paths';
   import type { PlayerProfile } from '$lib/player-profile';
   import AgentImage from './AgentImage.svelte';
-  import LoadingOverlay from './LoadingOverlay.svelte';
+  import LoadingBar from './LoadingBar.svelte';
 
   const defaultRiotId = 'Janhoi#VAL';
 
   let riotId = $state('');
   let errorMessage = $state<string | null>(null);
   let isLoading = $state(false);
-  // What the overlay says: the search first, then the page it opens.
-  let loadingLabel = $state('Finding player');
-  let searchedRiotId = $state('');
 
   function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
@@ -51,8 +48,6 @@
       return;
     }
 
-    searchedRiotId = `${parsedRiotId.name}#${parsedRiotId.tag}`;
-    loadingLabel = 'Finding player';
     isLoading = true;
     errorMessage = null;
 
@@ -67,8 +62,6 @@
         return;
       }
 
-      searchedRiotId = `${body.data.riotId.name}#${body.data.riotId.tag}`;
-      loadingLabel = 'Loading player';
       await goto(
         resolve(
           `/players/${encodeURIComponent(body.data.riotId.name)}/${encodeURIComponent(body.data.riotId.tag)}`,
@@ -137,11 +130,7 @@
   </div>
 </section>
 
-<LoadingOverlay
-  active={isLoading}
-  label={loadingLabel}
-  detail={searchedRiotId}
-/>
+<LoadingBar active={isLoading} label="Loading player…" />
 
 <style>
   section {

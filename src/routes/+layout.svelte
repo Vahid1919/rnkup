@@ -1,5 +1,6 @@
 <script lang="ts">
   import { navigating } from '$app/state';
+  import LoadingBar from '$lib/components/LoadingBar.svelte';
   import LoadingOverlay from '$lib/components/LoadingOverlay.svelte';
   import '../app.css';
 
@@ -7,20 +8,25 @@
 
   const targetRoute = $derived(navigating.to?.route.id ?? '');
 
-  const loadingLabel = $derived.by(() => {
+  // The player page shows its own placeholder while stats load, so getting
+  // there only needs the thin bar. Pages without one get the full overlay.
+  const toPlayerPage = $derived(targetRoute === '/players/[name]/[tag]');
+
+  // The landing search runs its own bar until the player page opens.
+  const fromSearch = $derived(
+    navigating.from?.route.id === '/' && toPlayerPage,
+  );
+
+  const showBar = $derived(
+    navigating.to !== null && toPlayerPage && !fromSearch,
+  );
+  const showOverlay = $derived(navigating.to !== null && !toPlayerPage);
+
+  const overlayLabel = $derived.by(() => {
     if (targetRoute.includes('/matches/')) return 'Loading match';
-    if (targetRoute.startsWith('/players/')) return 'Loading player';
     if (targetRoute === '/leaderboard') return 'Loading leaderboard';
     return 'Loading';
   });
-
-  // The landing search keeps its own overlay up until the player page opens.
-  const showLoading = $derived(
-    navigating.to !== null &&
-      !(
-        navigating.from?.route.id === '/' && targetRoute.startsWith('/players/')
-      ),
-  );
 </script>
 
 <svelte:head>
@@ -38,7 +44,8 @@
 
 <a class="skip-link" href="#main-content">Skip to main content</a>
 
-<!-- Quick page changes finish inside the delay and never show the overlay. -->
-<LoadingOverlay active={showLoading} label={loadingLabel} delay={300} />
+<!-- Quick page changes finish inside the delay and show neither. -->
+<LoadingBar active={showBar} label="Loading player…" />
+<LoadingOverlay active={showOverlay} label={overlayLabel} delay={300} />
 
 {@render children()}
