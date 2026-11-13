@@ -5,6 +5,7 @@
   import {
     STAT_DEFINITIONS,
     type CompetitiveSummary,
+    type Insight,
     type LobbyBenchmarks,
     type PlayerRating,
     type StatKey,
@@ -16,8 +17,8 @@
     benchmarks: LobbyBenchmarks | null;
     rating: PlayerRating | null;
     level: number | null;
-    /** Every match the provider has stored, not just the analysed sample. */
-    storedCount: number;
+    /** The first thing coaching says to work on, linked from the overview. */
+    topFocus: Insight | null;
   };
 
   type Headline = {
@@ -38,19 +39,13 @@
   const RING_RADIUS = 42;
   const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
 
-  let { summary, benchmarks, rating, level, storedCount }: Props = $props();
+  let { summary, benchmarks, rating, level, topFocus }: Props = $props();
 
   const numberFormat = new Intl.NumberFormat('en-US');
 
   function count(value: number): string {
     return numberFormat.format(value);
   }
-
-  const sampleLine = $derived(
-    storedCount > summary.matchCount
-      ? `From your last ${summary.matchCount} ranked matches (${storedCount} on record).`
-      : `From your ${summary.matchCount} ranked matches on record.`,
-  );
 
   const playtime = $derived(
     summary.playtimeMs === null
@@ -256,16 +251,15 @@
         </div>
       {/each}
     </dl>
-  </div>
 
-  <p class="hint">
-    {sampleLine}
-    {#if benchmarks}
-      "Your lobby" is the average of the other nine players in those matches.
+    {#if topFocus}
+      <a class="focus-link" href="#focus">
+        <span class="focus-label">Top focus</span>
+        <span class="focus-title">{topFocus.title}</span>
+        <span class="focus-arrow" aria-hidden="true">→</span>
+      </a>
     {/if}
-    KAST: {STAT_DEFINITIONS.kast.description}
-    Traded deaths: {STAT_DEFINITIONS.tradedDeathRate.description}
-  </p>
+  </div>
 </div>
 
 <style>
@@ -307,19 +301,17 @@
     padding: var(--space-5);
   }
 
+  /* Level, record and rank share the row in even gaps. */
   .top-row {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: space-between;
     gap: var(--space-4) var(--space-6);
   }
 
   .level strong {
     font-size: var(--text-display-sm);
-  }
-
-  .top-rating {
-    margin-left: auto;
   }
 
   .level {
@@ -463,17 +455,60 @@
     color: var(--val-loss);
   }
 
-  .hint {
-    max-width: 48rem;
-    margin-top: var(--space-3);
-    color: var(--val-faint);
-    font-size: var(--text-sm);
+  /* Points down the page to the coaching section. */
+  .focus-link {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    border: 1px solid var(--val-loss-line);
+    border-left: 3px solid var(--val-loss);
+    border-radius: var(--radius);
+    padding: var(--space-3) var(--space-4);
+    color: var(--val-cream);
+    background: color-mix(in srgb, var(--val-loss) 7%, var(--val-panel));
+    text-decoration: none;
+    transition: background-color 150ms ease;
+  }
+
+  .focus-link:hover {
+    background: color-mix(in srgb, var(--val-loss) 14%, var(--val-panel));
+  }
+
+  .focus-link:focus-visible {
+    outline: 2px solid var(--val-cream);
+    outline-offset: 2px;
+  }
+
+  .focus-label {
+    flex-shrink: 0;
+    color: var(--val-loss);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .focus-title {
+    font-weight: 600;
+  }
+
+  .focus-arrow {
+    margin-left: auto;
+    color: var(--val-loss);
+    transition: transform 150ms ease;
+  }
+
+  .focus-link:hover .focus-arrow {
+    transform: translateX(3px);
   }
 
   @media (max-width: 760px) {
+    .top-row {
+      justify-content: flex-start;
+    }
+
     .top-rating {
       flex-basis: 100%;
-      margin-left: 0;
     }
 
     .headline-grid,

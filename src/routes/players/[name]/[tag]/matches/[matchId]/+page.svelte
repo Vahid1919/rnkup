@@ -4,7 +4,6 @@
   import { resolve } from '$app/paths';
   import AgentIcon from '$lib/components/AgentIcon.svelte';
   import DuelMatrix from '$lib/components/DuelMatrix.svelte';
-  import EconomyChart from '$lib/components/match/EconomyChart.svelte';
   import MatchMap from '$lib/components/match/MatchMap.svelte';
   import RoundReview from '$lib/components/match/RoundReview.svelte';
   import Nav from '$lib/components/Nav.svelte';
@@ -116,7 +115,7 @@
   </title>
   <meta
     name="description"
-    content="Scoreboard, round replays, positions and economy for one competitive match."
+    content="Round replays, positions, scoreboard and duels for one competitive match."
   />
 </svelte:head>
 
@@ -188,8 +187,27 @@
     </dl>
   </header>
 
+  {#if hasRounds}
+    <section id="rounds" class="page-section" aria-labelledby="rounds-title">
+      <div class="section-heading">
+        <h2 id="rounds-title" class="section-title">Rounds</h2>
+        <p class="section-meta">Replay any round, kill by kill</p>
+      </div>
+      <RoundReview
+        {match}
+        subjectPuuid={profile.puuid}
+        {allyTeamId}
+        bind:selectedRound
+      />
+    </section>
+  {/if}
+
   {#if subject}
-    <section id="summary" class="summary" aria-labelledby="your-game-title">
+    <section
+      id="summary"
+      class="page-section"
+      aria-labelledby="your-game-title"
+    >
       <div class="section-heading">
         <h2 id="your-game-title" class="section-title">Your game</h2>
       </div>
@@ -219,6 +237,20 @@
           {/each}
         </ul>
       {/if}
+    </section>
+  {/if}
+
+  {#if hasMap && subject}
+    <section id="map" class="page-section" aria-labelledby="map-title">
+      <div class="section-heading">
+        <h2 id="map-title" class="section-title">Map</h2>
+        <p class="section-meta">Where you won and lost your fights</p>
+      </div>
+      <MatchMap
+        {match}
+        subjectPuuid={profile.puuid}
+        onSelectRound={openRound}
+      />
     </section>
   {/if}
 
@@ -257,45 +289,6 @@
       />
     </div>
   </section>
-
-  {#if hasRounds}
-    <section id="rounds" class="page-section" aria-labelledby="rounds-title">
-      <div class="section-heading">
-        <h2 id="rounds-title" class="section-title">Rounds</h2>
-        <p class="section-meta">Replay any round, kill by kill</p>
-      </div>
-      <RoundReview
-        {match}
-        subjectPuuid={profile.puuid}
-        {allyTeamId}
-        bind:selectedRound
-      />
-    </section>
-  {/if}
-
-  {#if hasMap && subject}
-    <section id="map" class="page-section" aria-labelledby="map-title">
-      <div class="section-heading">
-        <h2 id="map-title" class="section-title">Map</h2>
-        <p class="section-meta">Where you won and lost your fights</p>
-      </div>
-      <MatchMap
-        {match}
-        subjectPuuid={profile.puuid}
-        onSelectRound={openRound}
-      />
-    </section>
-  {/if}
-
-  {#if hasRounds && allyTeamId}
-    <section id="economy" class="page-section" aria-labelledby="economy-title">
-      <div class="section-heading">
-        <h2 id="economy-title" class="section-title">Economy</h2>
-        <p class="section-meta">Loadout value each round</p>
-      </div>
-      <EconomyChart {match} {allyTeamId} onSelectRound={openRound} />
-    </section>
-  {/if}
 
   {#if hasRounds && subject && enemies.length > 0}
     <section id="duels" class="page-section" aria-labelledby="duels-title">
@@ -404,7 +397,8 @@
     font-weight: 400;
   }
 
-  .summary {
+  /* The first section sits a little closer to the match header. */
+  .match-header + .page-section {
     margin-top: var(--space-7);
   }
 

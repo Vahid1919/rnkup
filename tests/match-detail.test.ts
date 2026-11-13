@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { facingOnMinimap, minimapUrl, toMinimap } from '../src/lib/maps';
 import {
   buildMatchDetail,
-  buyRecords,
-  economySwings,
   playerEncounters,
   roundEvents,
   roundSnapshot,
@@ -289,24 +287,6 @@ describe('round replay', () => {
         opponentLocation: { x: 20, y: 20 },
       }),
     ]);
-  });
-
-  it('records buys and rounds that went against the money', () => {
-    expect(buyRecords(detail, 'A')).toEqual([
-      { buyType: 'full-buy', played: 2, won: 0 },
-    ]);
-    expect(buyRecords(detail, 'B')).toEqual([
-      { buyType: 'eco', played: 1, won: 1 },
-      { buyType: 'full-buy', played: 1, won: 1 },
-    ]);
-    expect(economySwings(detail, 'A')).toEqual({
-      lostWithBetterBuy: [1],
-      wonWithWorseBuy: [],
-    });
-    expect(economySwings(detail, 'B')).toEqual({
-      lostWithBetterBuy: [],
-      wonWithWorseBuy: [1],
-    });
   });
 });
 

@@ -55,14 +55,17 @@ The key is read only by server code. Do not prefix it with `PUBLIC_` or commit
 - Stats, trends and coaching use up to **100 detailed matches**, loaded 10 per
   request with all ten requests sent at once. The match log also lists up to
   500 lighter stored matches.
+- The activity calendar covers the last 13 weeks of that match log. Days
+  before its oldest stored match show as unknown, not as days off. Tabs shade
+  each day by matches played, K/D or win rate.
 - The player page shows the profile first and streams in the stats once the
   matches have loaded.
 - Neither is a player's full career history; the provider only keeps what it
   has stored.
 - KAST, first kills and deaths, and trades come from the round-by-round kill
   feed, and are empty for matches without it.
-- The match page's round replay, kills and deaths map, and economy use the
-  positions and loadouts recorded at each kill, plant and defuse. Positions
+- The match page's round replay and kills and deaths map use the positions
+  and loadouts recorded at each kill, plant and defuse. Positions
   are still frames, not movement, and only maps listed in `src/lib/maps.ts`
   get a minimap.
 - Results are cached in memory for 15 minutes per player.

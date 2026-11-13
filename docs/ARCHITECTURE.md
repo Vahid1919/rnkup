@@ -49,8 +49,9 @@ src/
       breakdowns.ts             By agent, map, role, side, play session
       drivers.ts                Which stats separate wins from losses
       insights.ts               Coaching rules and per-match takeaways (see ADR 0004)
-      history.ts                Match log and per-act summaries
-      rating-range.ts           Time windows (1M to All) for the rank rating chart
+      history.ts                Match log, totals for any group of matches, per-act summaries
+      activity.ts               Activity calendar: days played, per-tab day shading and legend
+      rating-range.ts           Time windows (1W to All) for the rank rating chart
       stats.ts                  Labels, units and accessors for each stat
       math.ts                   Rounding and percentage helpers
     match-detail.ts             One match: scoreboard, rounds, KAST, trades, duels, round replay, buys
@@ -60,9 +61,9 @@ src/
     agents.ts, ranks.ts         Static Valorant reference data (roles, images, tiers)
     format.ts                   Number and date formatting for the UI
     components/                 Shared Svelte components (LoadingBar is the thin top progress bar, LoadingOverlay the full-screen spinner)
-      player/                   Player page sections (header, focus, form, trends, breakdown, matches, loading skeleton)
+      player/                   Player page sections (header, form, coaching, activity and rank trends, matches, breakdown, loading skeleton)
         insight-stats.ts        Which stat each coaching insight is about (for the KAST explainer)
-      match/                    Match page sections (Minimap, RoundReview, MatchMap, EconomyChart)
+      match/                    Match page sections (Minimap, RoundReview, MatchMap)
   routes/
     +page.svelte                Search page
     +layout.svelte              Global styles, skip link, loading bar and overlay
@@ -114,9 +115,8 @@ static/images/                  Agent and app images
    and duels; `buildMatchTakeaways()` writes the short notes.
 3. The page's sections read the same `MatchDetail` through pure helpers:
    `roundEvents()` and `roundSnapshot()` for the round replay,
-   `playerEncounters()` for the kills and deaths map, and `buyRecords()` and
-   `economySwings()` for the economy. `maps.ts` places positions on the
-   minimap.
+   and `playerEncounters()` for the kills and deaths map. `maps.ts` places
+   positions on the minimap.
 4. The player's recent averages come from the dashboard cache only if it is
    warm, so a match page never triggers a full history lookup.
 
@@ -140,6 +140,7 @@ static/images/                  Agent and app images
 | Show a new field from HenrikDev              | `parse.ts` (validate it) → `match-detail.ts` or `dashboard/types.ts` (model it) |
 | Add or change a calculated stat              | `dashboard/summary.ts` and `dashboard/stats.ts`, plus `tests/dashboard.test.ts` |
 | Add a coaching rule                          | `dashboard/insights.ts` (add to `buildInsights`), plus a test                   |
+| Change the activity calendar                 | `dashboard/activity.ts` (maths) and `components/player/ActivityCalendar.svelte` |
 | Change a match-page number (KAST, trades, …) | `match-detail.ts`, plus `tests/match-detail.test.ts`                            |
 | Change caching or request limits             | `server/valorant/cache.ts` or the constants in `henrik-client.ts`               |
 | Change leaderboard filters or paging         | `leaderboard.ts`, plus `tests/leaderboard.test.ts`                              |

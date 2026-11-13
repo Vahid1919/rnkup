@@ -42,6 +42,15 @@ import type {
 export type * from './types';
 export { RELIABLE_SAMPLE_MATCHES } from './breakdowns';
 export { STAT_DEFINITIONS } from './stats';
+export {
+  ACTIVITY_WEEKS,
+  activityLegend,
+  activityLevel,
+  buildActivity,
+  dayKillDeath,
+  dayWinRate,
+} from './activity';
+export { summarizeMatchLog } from './history';
 export { summarizeMatchForPlayer } from './match-summary';
 export {
   availableRatingRanges,
@@ -50,6 +59,7 @@ export {
   ratingPointsInRange,
   RATING_RANGES,
   type RatingRange,
+  type RatingWindow,
   type RatingRangeOption,
 } from './rating-range';
 export {

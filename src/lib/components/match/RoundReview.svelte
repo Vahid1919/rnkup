@@ -10,6 +10,7 @@
     type MatchDetail,
     type MatchRound,
     type MatchRoundTeam,
+    type MatchSide,
     type RoundEvent,
   } from '$lib/match-detail';
   import Minimap from './Minimap.svelte';
@@ -38,13 +39,127 @@
       match.rounds[0],
   );
   const events = $derived(round ? roundEvents(round) : []);
-  // Starts each round at its first event; the stepper then overrides it.
-  let step = $derived.by(() => {
-    void round;
-    return 0;
-  });
-  const snapshot = $derived(roundSnapshot(events, step));
   const showMap = $derived(minimapUrl(match.mapId) !== null);
+
+  // The event on screen, remembered against its round. A round opened from
+  // anywhere else has no cursor yet, so it starts at its first event.
+  let cursor = $state.raw<{ round: MatchRound; step: number } | null>(null);
+  const step = $derived(
+    round && cursor?.round === round
+      ? Math.min(cursor.step, Math.max(0, events.length - 1))
+      : 0,
+  );
+  const snapshot = $derived(roundSnapshot(events, step));
+
+  const roundIndex = $derived(round ? match.rounds.indexOf(round) : -1);
+  const previousRound = $derived(match.rounds[roundIndex - 1] ?? null);
+  const nextRound = $derived(
+    roundIndex < 0 ? null : (match.rounds[roundIndex + 1] ?? null),
+  );
+  const atFirstEvent = $derived(step === 0);
+  const atLastEvent = $derived(step >= events.length - 1);
+
+  function showStep(index: number): void {
+    if (round) cursor = { round, step: index };
+  }
+
+  function openRound(target: MatchRound, at: 'start' | 'end' = 'start'): void {
+    cursor = {
+      round: target,
+      step: at === 'end' ? Math.max(0, roundEvents(target).length - 1) : 0,
+    };
+    selectedRound = target.number;
+  }
+
+  function moveRound(delta: 1 | -1): void {
+    const target = delta > 0 ? nextRound : previousRound;
+    if (target) openRound(target);
+  }
+
+  /**
+   * Steps one event, running on into the neighbouring round at either end so
+   * the whole match plays as one sequence. Going back lands on the previous
+   * round's last event.
+   */
+  function moveStep(delta: 1 | -1): void {
+    const target = step + delta;
+    if (showMap && target >= 0 && target < events.length) {
+      showStep(target);
+    } else if (delta > 0) {
+      moveRound(1);
+    } else if (previousRound) {
+      openRound(previousRound, showMap ? 'end' : 'start');
+    }
+  }
+
+  let root = $state<HTMLElement>();
+  let strip = $state<HTMLElement>();
+  let feed = $state<HTMLElement>();
+
+  /** Whether any of the review sits below the sticky header and on screen. */
+  function onScreen(): boolean {
+    if (!root) return false;
+    const box = root.getBoundingClientRect();
+    const header = document.querySelector('header')?.offsetHeight ?? 0;
+    return box.bottom > header && box.top < window.innerHeight;
+  }
+
+  // Arrow keys drive the replay from anywhere on the page while it is on
+  // screen. Form controls keep their own arrow keys, which is what lets the
+  // round picker change rounds when it has focus.
+  function onKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    if (
+      event.defaultPrevented ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    if (
+      event.target instanceof Element &&
+      event.target.closest('input, select, textarea, [contenteditable]')
+    ) {
+      return;
+    }
+    if (!onScreen()) return;
+    event.preventDefault();
+    const delta = event.key === 'ArrowRight' ? 1 : -1;
+    if (event.shiftKey) moveRound(delta);
+    else moveStep(delta);
+  }
+
+  /** Scrolls a container, and nothing else, until the child is in view. */
+  function reveal(container: HTMLElement, child: HTMLElement): void {
+    const box = container.getBoundingClientRect();
+    const item = child.getBoundingClientRect();
+    const margin = 8;
+    if (item.left < box.left) {
+      container.scrollLeft -= box.left - item.left + margin;
+    } else if (item.right > box.right) {
+      container.scrollLeft += item.right - box.right + margin;
+    }
+    if (item.top < box.top) {
+      container.scrollTop -= box.top - item.top + margin;
+    } else if (item.bottom > box.bottom) {
+      container.scrollTop += item.bottom - box.bottom + margin;
+    }
+  }
+
+  // Keep the picked round and the current event visible in their scrollers.
+  $effect(() => {
+    const tile = strip?.querySelector<HTMLElement>(
+      `[data-round="${round?.number}"]`,
+    );
+    if (strip && tile) reveal(strip, tile);
+  });
+
+  $effect(() => {
+    void round;
+    const row = feed?.querySelector<HTMLElement>(`[data-step="${step}"]`);
+    if (feed && row) reveal(feed, row);
+  });
 
   const END_LABELS: Record<string, string> = {
     elimination: 'Elimination',
@@ -61,29 +176,40 @@
   type RoundSummary = {
     number: number;
     won: boolean;
-    side: string | null;
+    side: MatchSide | null;
     endType: string;
-    firstKillForUs: boolean | null;
-    subjectKills: number;
-    subjectSurvived: boolean;
   };
 
   function summarize(entry: MatchRound): RoundSummary {
-    const firstKill = entry.kills.find((kill) => kill.isFirstKill);
-    const me = entry.players.find((player) => player.puuid === subjectPuuid);
     return {
       number: entry.number,
       won: entry.winningTeamId === allyTeamId,
       side:
         entry.teams.find((team) => team.teamId === allyTeamId)?.side ?? null,
       endType: entry.endType,
-      firstKillForUs: firstKill ? isAlly(firstKill.killerPuuid) : null,
-      subjectKills: me?.kills ?? 0,
-      subjectSurvived: me?.survived ?? false,
     };
   }
 
   const summaries = $derived(match.rounds.map(summarize));
+
+  type SideRun = { side: MatchSide | null; rounds: RoundSummary[] };
+
+  // Consecutive rounds on one side: the two halves, then one round at a time
+  // in overtime, where the sides swap every round.
+  const sideRuns = $derived.by(() => {
+    const runs: SideRun[] = [];
+    for (const summary of summaries) {
+      const last = runs.at(-1);
+      if (last && last.side === summary.side) last.rounds.push(summary);
+      else runs.push({ side: summary.side, rounds: [summary] });
+    }
+    return runs;
+  });
+
+  const SIDE_LABELS: Record<MatchSide, { long: string; short: string }> = {
+    attack: { long: 'Attack', short: 'Atk' },
+    defense: { long: 'Defense', short: 'Def' },
+  };
   const current = $derived(round ? summarize(round) : null);
 
   function roundLabel(summary: RoundSummary): string {
@@ -91,12 +217,6 @@
       `Round ${summary.number}: ${summary.won ? 'won' : 'lost'}`,
       summary.side ? `on ${summary.side}` : null,
       END_LABELS[summary.endType] ?? null,
-      summary.firstKillForUs === null
-        ? null
-        : summary.firstKillForUs
-          ? 'your team got the first kill'
-          : 'enemy got the first kill',
-      `you: ${summary.subjectKills} ${summary.subjectKills === 1 ? 'kill' : 'kills'}, ${summary.subjectSurvived ? 'survived' : 'died'}`,
     ]
       .filter(Boolean)
       .join(', ');
@@ -158,24 +278,6 @@
   }
 </script>
 
-{#snippet firstKillMark()}
-  <svg class="mark" viewBox="0 0 10 10" aria-hidden="true">
-    <path d="M5 0.8 9.2 5 5 9.2 0.8 5z" fill="currentColor" />
-  </svg>
-{/snippet}
-
-{#snippet deathMark()}
-  <svg class="mark" viewBox="0 0 10 10" aria-hidden="true">
-    <path
-      d="M2 2l6 6M8 2l-6 6"
-      fill="none"
-      stroke="currentColor"
-      stroke-linecap="round"
-      stroke-width="1.6"
-    />
-  </svg>
-{/snippet}
-
 {#snippet person(puuid: string)}
   {@const player = playersById.get(puuid)}
   <span class="person" class:me={puuid === subjectPuuid}>
@@ -188,44 +290,54 @@
   </span>
 {/snippet}
 
-<div class="round-review">
+<svelte:window onkeydown={onKeydown} />
+
+<div class="round-review" bind:this={root}>
+  <!-- Sticks under the header so any round is one click away mid-review. -->
   <fieldset class="round-picker">
     <legend class="sr-only">Pick a round to review</legend>
-    <p class="legend" aria-hidden="true">
-      <span><span class="swatch won">W</span> Win</span>
-      <span><span class="swatch lost">L</span> Loss</span>
-      <span><span class="legend-kills">2K</span> Your kills</span>
-      <span>{@render firstKillMark()} Your team got the first kill</span>
-      <span>{@render deathMark()} You died</span>
-    </p>
-    <ol class="rounds">
-      {#each summaries as summary (summary.number)}
-        <li
-          class:won={summary.won}
-          class:lost={!summary.won}
-          class:half={summary.number === 13 || summary.number === 25}
-        >
-          <label>
-            <input
-              type="radio"
-              name="{uid}-round"
-              value={summary.number}
-              checked={summary.number === round?.number}
-              onchange={() => (selectedRound = summary.number)}
-            />
-            <span class="sr-only">{roundLabel(summary)}</span>
-            <span aria-hidden="true" class="round-head">
-              <span class="round-number">{summary.number}</span>
-              <span class="round-result">{summary.won ? 'W' : 'L'}</span>
-            </span>
-            <span aria-hidden="true" class="round-kills">
-              {summary.subjectKills > 0 ? `${summary.subjectKills}K` : ''}
-            </span>
-            <span aria-hidden="true" class="round-marks">
-              {#if summary.firstKillForUs}{@render firstKillMark()}{/if}
-              {#if !summary.subjectSurvived}{@render deathMark()}{/if}
-            </span>
-          </label>
+    <ol class="runs" bind:this={strip}>
+      {#each sideRuns as run (run.rounds[0]?.number)}
+        <li class="run" style:--count={run.rounds.length}>
+          <!-- Each round's own label names its side for screen readers. -->
+          <span class="run-side" aria-hidden="true">
+            {#if run.side}
+              {run.rounds.length > 1
+                ? SIDE_LABELS[run.side].long
+                : SIDE_LABELS[run.side].short}
+            {/if}
+          </span>
+          <ol class="rounds">
+            {#each run.rounds as summary (summary.number)}
+              <li
+                class:won={summary.won}
+                class:lost={!summary.won}
+                data-round={summary.number}
+              >
+                <label>
+                  <!-- A mouse click gives focus back to the page, so the arrow
+                       keys go on to step through the round just picked. -->
+                  <input
+                    type="radio"
+                    name="{uid}-round"
+                    value={summary.number}
+                    checked={summary.number === round?.number}
+                    onchange={() => (selectedRound = summary.number)}
+                    onclick={(event) => {
+                      if (event.detail > 0) event.currentTarget.blur();
+                    }}
+                  />
+                  <span class="sr-only">{roundLabel(summary)}</span>
+                  <span aria-hidden="true" class="round-number">
+                    {summary.number}
+                  </span>
+                  <span aria-hidden="true" class="round-result">
+                    {summary.won ? 'W' : 'L'}
+                  </span>
+                </label>
+              </li>
+            {/each}
+          </ol>
         </li>
       {/each}
     </ol>
@@ -337,31 +449,41 @@
               {/snippet}
             </Minimap>
 
-            {#if events.length > 0}
-              <div class="stepper">
-                <button
-                  type="button"
-                  disabled={step === 0}
-                  onclick={() => (step -= 1)}
-                >
-                  <span aria-hidden="true">&larr;</span> Previous
-                </button>
-                <span class="step-count" aria-live="polite">
-                  Event {step + 1} of {events.length}
-                </span>
-                <button
-                  type="button"
-                  disabled={step >= events.length - 1}
-                  onclick={() => (step += 1)}
-                >
-                  Next <span aria-hidden="true">&rarr;</span>
-                </button>
-              </div>
-            {/if}
-            <p class="note">
-              Positions are captured at each kill, plant and defuse, so the map
-              shows still frames rather than movement.
-            </p>
+            <!-- At either end of a round the buttons carry on into the
+                 neighbouring round. -->
+            <div class="stepper">
+              <button
+                type="button"
+                disabled={atFirstEvent && !previousRound}
+                onclick={() => moveStep(-1)}
+              >
+                <span aria-hidden="true">&larr;</span>
+                {atFirstEvent && previousRound
+                  ? `Round ${previousRound.number}`
+                  : 'Previous'}
+              </button>
+              <span class="step-count" aria-live="polite">
+                {#if events.length > 0}
+                  <span class="sr-only">Event</span>
+                  {step + 1}
+                  <span aria-hidden="true">/</span>
+                  <span class="sr-only">of</span>
+                  {events.length}
+                {:else}
+                  No events
+                {/if}
+              </span>
+              <button
+                type="button"
+                disabled={atLastEvent && !nextRound}
+                onclick={() => moveStep(1)}
+              >
+                {atLastEvent && nextRound
+                  ? `Round ${nextRound.number}`
+                  : 'Next'}
+                <span aria-hidden="true">&rarr;</span>
+              </button>
+            </div>
           </div>
         {/if}
 
@@ -370,9 +492,9 @@
           {#if events.length === 0}
             <p class="note">No kills were recorded this round.</p>
           {:else}
-            <ol class="events">
+            <ol class="events" bind:this={feed}>
               {#each events as event, index (`${event.kind}-${index}`)}
-                <li>
+                <li data-step={index}>
                   <button
                     type="button"
                     class="event"
@@ -386,7 +508,7 @@
                       ? 'step'
                       : undefined}
                     aria-label={describe(event)}
-                    onclick={() => (step = index)}
+                    onclick={() => showStep(index)}
                   >
                     <span class="clock">{formatRoundClock(event.timeMs)}</span>
                     {#if event.kind === 'kill'}
@@ -428,6 +550,23 @@
             </ol>
           {/if}
         </div>
+      </div>
+
+      <div class="footnotes">
+        {#if showMap}
+          <p class="note">
+            Positions are captured at each kill, plant and defuse, so the map
+            shows still frames rather than movement.
+          </p>
+        {/if}
+        <p class="note keys">
+          {#if showMap}
+            <kbd>&larr;</kbd> <kbd>&rarr;</kbd> step through events ·
+            <kbd>Shift</kbd> + <kbd>&larr;</kbd> <kbd>&rarr;</kbd> change round
+          {:else}
+            <kbd>&larr;</kbd> <kbd>&rarr;</kbd> change round
+          {/if}
+        </p>
       </div>
 
       <details class="loadouts">
@@ -473,96 +612,109 @@
 </div>
 
 <style>
+  /* The map is sized from the viewport height: what is left once the sticky
+     header, the round strip, the round title and the stepper have their
+     room. That keeps a whole round on screen with nothing to scroll. */
   .round-review {
+    --map-size: clamp(
+      18rem,
+      calc(100dvh - var(--header-height) - 15rem),
+      44rem
+    );
     display: grid;
-    gap: var(--space-5);
-  }
-
-  .round-picker {
-    display: grid;
-    gap: var(--space-3);
-    margin: 0;
-    border: 0;
-    padding: 0;
-  }
-
-  .legend {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-2) var(--space-5);
-    margin: 0;
-    color: var(--val-faint);
-    font-size: var(--text-sm);
-  }
-
-  .legend > span {
-    display: inline-flex;
-    align-items: center;
+    grid-template-columns: minmax(0, 1fr);
     gap: var(--space-2);
   }
 
-  /* Won is a filled tile, lost an outlined one, and each carries a letter. */
-  .swatch {
-    display: inline-grid;
-    width: 1.25rem;
-    height: 1.25rem;
-    place-items: center;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    font-size: var(--text-xs);
-    font-weight: 600;
-    line-height: 1;
+  .round-picker {
+    position: sticky;
+    z-index: 10;
+    top: var(--header-height);
+    min-width: 0;
+    margin: 0;
+    border: 0;
+    padding: var(--space-2) 0;
+    background: var(--val-bg);
   }
 
-  .swatch.won,
+  /* Won is a filled tile, lost an outlined one, and each carries a letter. */
   .rounds li.won label {
     border-color: var(--val-win-fill);
     color: var(--val-win);
     background: var(--val-win-fill);
   }
 
-  .swatch.lost,
   .rounds li.lost label {
     border-color: var(--val-loss-line);
     color: var(--val-loss);
     background: transparent;
   }
 
-  .legend-kills {
-    color: var(--val-cream);
-    font-weight: 600;
+  /* One row for the whole match, scrolling sideways when it runs long. The
+     padding leaves room for the selection ring inside the scroller. Each run
+     of rounds on one side grows by its round count, so tiles stay even. */
+  .runs {
+    display: flex;
+    gap: var(--space-3);
+    overflow-x: auto;
+    margin: -5px;
+    padding: 5px;
+    list-style: none;
+    scrollbar-width: thin;
   }
 
-  .mark {
-    width: 0.7rem;
-    height: 0.7rem;
-    flex-shrink: 0;
-    color: var(--val-cream);
+  /* The basis covers the run's inner gaps, so the space shared out by
+     round count leaves every tile the same width. */
+  .run {
+    display: grid;
+    flex: var(--count) 0 calc((var(--count) - 1) * var(--space-1));
+    gap: var(--space-1);
+  }
+
+  /* The side sits above its run as a label with a rule out to the run's end. */
+  .run-side {
+    display: flex;
+    min-height: 1rem;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--val-faint);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .run-side::after {
+    height: 1px;
+    flex: 1;
+    background: var(--val-line-strong);
+    content: '';
   }
 
   .rounds {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(3.25rem, 1fr));
+    display: flex;
     gap: var(--space-1);
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
-  .rounds li.half {
-    grid-column-start: 1;
+  .rounds li {
+    min-width: 2rem;
+    flex: 1 0 0;
   }
 
   .rounds label {
     position: relative;
     display: grid;
     justify-items: center;
-    gap: var(--space-1);
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
-    padding: var(--space-2) var(--space-1);
+    padding: var(--space-1) 2px;
     font-variant-numeric: tabular-nums;
+    line-height: 1.25;
     cursor: pointer;
     transition: box-shadow 150ms ease;
   }
@@ -577,7 +729,7 @@
 
   .rounds label:has(input:focus-visible) {
     outline: 2px solid var(--val-cream);
-    outline-offset: 3px;
+    outline-offset: 2px;
   }
 
   .rounds input {
@@ -588,41 +740,23 @@
     cursor: pointer;
   }
 
-  .round-head {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-1);
+  .round-number {
+    color: var(--val-muted);
     font-size: var(--text-xs);
   }
 
-  .round-number {
-    color: var(--val-faint);
-  }
-
   .round-result {
-    font-weight: 600;
-  }
-
-  .round-kills {
-    min-height: 1.4em;
-    color: var(--val-cream);
     font-size: var(--text-sm);
     font-weight: 600;
   }
 
-  .round-marks {
-    display: flex;
-    min-height: 0.75rem;
-    align-items: center;
-    gap: var(--space-1);
-  }
-
   .round-body {
     display: grid;
-    gap: var(--space-5);
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
     border: 1px solid var(--val-line);
     border-radius: var(--radius);
-    padding: var(--space-5);
+    padding: var(--space-4) var(--space-5) var(--space-5);
     background: var(--val-panel);
   }
 
@@ -683,9 +817,10 @@
 
   .replay {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns:
+      min(calc(50% - var(--space-5) / 2), var(--map-size))
+      minmax(0, 1fr);
     gap: var(--space-5);
-    align-items: start;
   }
 
   .replay.no-map {
@@ -694,7 +829,21 @@
 
   .map-column {
     display: grid;
+    align-content: start;
     gap: var(--space-3);
+  }
+
+  /* Beside the map the timeline takes the map's height and scrolls inside
+     it, so a long round never pushes the stepper off screen. */
+  .timeline {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    contain: size;
+  }
+
+  .replay.no-map .timeline {
+    contain: none;
   }
 
   .stepper {
@@ -705,6 +854,7 @@
   }
 
   .stepper button {
+    min-width: 6rem;
     min-height: 2.5rem;
     border: 1px solid var(--val-line);
     border-radius: var(--radius);
@@ -731,6 +881,7 @@
     color: var(--val-muted);
     font-size: var(--text-sm);
     font-variant-numeric: tabular-nums;
+    text-align: center;
   }
 
   .note {
@@ -748,12 +899,42 @@
     text-transform: uppercase;
   }
 
+  .footnotes {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: var(--space-1) var(--space-5);
+  }
+
+  kbd {
+    display: inline-block;
+    min-width: 1.5rem;
+    border: 1px solid var(--val-line-strong);
+    border-radius: var(--radius-sm);
+    padding: 0 var(--space-1);
+    color: var(--val-muted);
+    font: inherit;
+    font-size: var(--text-xs);
+    text-align: center;
+  }
+
+  /* Keyboard hints mean nothing on a touch screen. */
+  @media (hover: none) {
+    .keys {
+      display: none;
+    }
+  }
+
   .events {
     display: grid;
+    min-height: 0;
+    align-content: start;
     gap: 2px;
+    overflow-y: auto;
     margin: 0;
     padding: 0;
     list-style: none;
+    scrollbar-width: thin;
   }
 
   /* The left edge carries team colour; the killer's side owns the row. */
@@ -964,7 +1145,19 @@
     }
 
     .map-column {
-      max-width: 32rem;
+      max-width: min(32rem, var(--map-size));
+    }
+
+    /* Stacked under the map, the timeline runs at its full length. */
+    .timeline {
+      contain: none;
+    }
+  }
+
+  /* A short window has no room to spare for a pinned strip. */
+  @media (max-height: 30rem) {
+    .round-picker {
+      position: static;
     }
   }
 
@@ -975,6 +1168,15 @@
 
     .buys {
       margin-left: 0;
+    }
+
+    .stepper {
+      gap: var(--space-2);
+    }
+
+    .stepper button {
+      min-width: 0;
+      padding: 0 var(--space-3);
     }
 
     .loadout-tables {

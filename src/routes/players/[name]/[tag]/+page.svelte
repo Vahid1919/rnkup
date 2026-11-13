@@ -75,13 +75,15 @@
           benchmarks={dashboard.benchmarks}
           rating={dashboard.rating}
           level={profile.accountLevel}
-          storedCount={dashboard.matchLog.length}
+          topFocus={dashboard.insights.focus.at(0) ?? null}
         />
-        <TrendsSection ratingHistory={dashboard.ratingHistory} />
       </section>
 
-      <FocusSection {summary} insights={dashboard.insights} />
-      <BreakdownSection {dashboard} />
+      <FocusSection insights={dashboard.insights} />
+      <TrendsSection
+        ratingHistory={dashboard.ratingHistory}
+        matchLog={dashboard.matchLog}
+      />
     {/if}
 
     <MatchesSection
@@ -90,6 +92,10 @@
       tag={profile.riotId.tag}
       bind:view={historyView}
     />
+
+    {#if hasDetailedMatches}
+      <BreakdownSection {dashboard} />
+    {/if}
   {/if}
 {/snippet}
 

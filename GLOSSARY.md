@@ -18,7 +18,7 @@ The Player's identity, region, account level, and card artwork.
 
 **Player Dashboard**:
 The view of a Player Profile, Insights, Competitive Summary, trends,
-breakdowns and Match Log.
+Activity, breakdowns and Match Log.
 
 **Competitive History**:
 The recent Competitive Matches with full round-by-round detail. Every stat and
@@ -34,6 +34,14 @@ The list of Stored Matches on the Player Dashboard. It can reach further back
 than the Competitive History.
 _Avoid_: Match history (ambiguous)
 
+**Activity**:
+A calendar of the last 13 weeks of the Match Log, showing how often the Player
+played. Each day can be shaded by matches played, K/D or win rate.
+
+**Active Day**:
+A calendar day, in the viewer's time zone, with at least one Stored Match.
+Days before the oldest Stored Match are unknown, not inactive.
+
 **Match Detail**:
 One Competitive Match in full: both teams, every round, and who killed whom,
 seen from one Player's side.
@@ -47,10 +55,6 @@ records positions at those events, so it is not continuous movement.
 How much a team spent in a round, from its total loadout value: Eco (under
 5,000), Semi-eco (under 10,000), Half buy (under 20,000) or Full buy.
 _Avoid_: Force buy (not detected)
-
-**Economy Swing**:
-A round won while buying at least two Buy Types below the enemy, or lost
-while buying at least two above them.
 
 **Competitive Match**:
 One completed Valorant competitive game in a Player's Competitive History.

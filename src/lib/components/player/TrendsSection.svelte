@@ -1,5 +1,6 @@
-<!-- Rank rating over a chosen time range. Nothing renders when the provider has no rating history. -->
+<!-- How often the player plays, beside rank rating over a chosen time range. The chart is left out when the provider has no rating history. -->
 <script lang="ts">
+  import ActivityCalendar from '$lib/components/player/ActivityCalendar.svelte';
   import TrendChart, {
     type TrendChartPoint,
   } from '$lib/components/TrendChart.svelte';
@@ -8,6 +9,7 @@
     DEFAULT_RATING_RANGE,
     ratingChange,
     ratingPointsInRange,
+    type MatchLogEntry,
     type RatingPoint,
     type RatingRange,
   } from '$lib/dashboard';
@@ -16,9 +18,11 @@
 
   type Props = {
     ratingHistory: RatingPoint[];
+    /** Every stored match, for the activity calendar. */
+    matchLog: MatchLogEntry[];
   };
 
-  let { ratingHistory }: Props = $props();
+  let { ratingHistory, matchLog }: Props = $props();
   let selected = $state<RatingRange>(DEFAULT_RATING_RANGE);
 
   const ranges = $derived(availableRatingRanges(ratingHistory));
@@ -27,7 +31,7 @@
     ranges.find((option) => option.id === selected) ?? ranges.at(-1),
   );
   const shown = $derived(
-    ratingPointsInRange(ratingHistory, range?.months ?? null),
+    ratingPointsInRange(ratingHistory, range?.window ?? null),
   );
 
   const ratingPoints = $derived(
@@ -93,26 +97,45 @@
   {/if}
 {/snippet}
 
-{#if hasRatingChart}
-  <div class="trends panel">
-    <TrendChart
-      title="Rank rating"
-      {description}
-      points={ratingPoints}
-      formatValue={formatRating}
-      tickValues={ratingTicks}
-      formatTick={(value) => rankFromRating(value).name}
-      wideAxis
-      actions={rangePicker}
-      emptyMessage={`Only ${shown.length} rated game in the last ${range?.title ?? 'range'}. Pick a longer range to see a trend.`}
-    />
-  </div>
-{/if}
+<section
+  class="trends panel page-section"
+  class:has-chart={hasRatingChart}
+  aria-label="Activity and rank rating"
+>
+  <ActivityCalendar entries={matchLog} />
+  {#if hasRatingChart}
+    <div class="chart">
+      <TrendChart
+        title="Rank rating"
+        {description}
+        points={ratingPoints}
+        formatValue={formatRating}
+        tickValues={ratingTicks}
+        formatTick={(value) => rankFromRating(value).name}
+        wideAxis
+        actions={rangePicker}
+        emptyMessage={`Only ${shown.length} rated game in the last ${range?.title ?? 'range'}. Pick a longer range to see a trend.`}
+      />
+    </div>
+  {/if}
+</section>
 
 <style>
   .trends {
-    margin-top: var(--space-5);
     padding: var(--space-5);
+  }
+
+  /* Activity on the left, the chart filling the rest behind a divider. */
+  .trends.has-chart {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--space-6);
+  }
+
+  .chart {
+    min-width: 0;
+    border-left: 1px solid var(--val-line);
+    padding-left: var(--space-6);
   }
 
   /* A segmented control built from radio buttons, so arrow keys move
@@ -165,6 +188,19 @@
     margin: 0;
     opacity: 0;
     cursor: pointer;
+  }
+
+  @media (max-width: 860px) {
+    .trends.has-chart {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .chart {
+      border-top: 1px solid var(--val-line);
+      border-left: 0;
+      padding-top: var(--space-5);
+      padding-left: 0;
+    }
   }
 
   @media (max-width: 560px) {

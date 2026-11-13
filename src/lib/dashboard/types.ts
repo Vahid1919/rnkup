@@ -257,8 +257,8 @@ export type WinDriver = {
   gap: number;
 };
 
-export type ActSummary = {
-  seasonShort: string;
+/** Totals for any group of match log entries: an act, a day, a filter. */
+export type MatchLogTotals = {
   matches: number;
   wins: number;
   losses: number;
@@ -268,5 +268,36 @@ export type ActSummary = {
   averageDamagePerRound: number;
   averageCombatScore: number;
   headshotPercentage: number;
+};
+
+export type ActSummary = MatchLogTotals & {
+  seasonShort: string;
   endRank: Rank | null;
+};
+
+export type ActivityDay = {
+  /** The local calendar day as YYYY-MM-DD. */
+  date: string;
+  /** False for days still ahead this week or before the oldest stored match. */
+  inRange: boolean;
+  /** True for days still ahead this week. */
+  future: boolean;
+  matches: number;
+  wins: number;
+  losses: number;
+  draws: number;
+  kills: number;
+  deaths: number;
+};
+
+/** What the activity calendar shades each day by. */
+export type ActivityMetric = 'playtime' | 'killDeath' | 'winRate';
+
+export type ActivityReport = {
+  /** One column per week, each holding Sunday to Saturday. */
+  weeks: ActivityDay[][];
+  /** In-range days: today and back to the first Sunday or oldest match. */
+  dayCount: number;
+  activeDays: number;
+  busiestDay: number;
 };

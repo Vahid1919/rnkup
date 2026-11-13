@@ -21,6 +21,9 @@
 <section id="matches" class="page-section" aria-labelledby="matches-title">
   <div class="section-heading">
     <h2 id="matches-title" class="section-title">Matches</h2>
+    <p class="section-meta">
+      Open any match for its rounds, kill map and scoreboard.
+    </p>
     <button
       type="button"
       class="filter-toggle"

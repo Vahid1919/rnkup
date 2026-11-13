@@ -8,6 +8,7 @@ import type {
   CareerMatchInput,
   CompetitiveMatch,
   MatchLogEntry,
+  MatchLogTotals,
   PlayerRating,
   RatingPoint,
 } from './types';
@@ -80,6 +81,48 @@ export function buildMatchLog(
   );
 }
 
+/** Results and per-round averages across any group of entries. */
+export function summarizeMatchLog(entries: MatchLogEntry[]): MatchLogTotals {
+  const totals = {
+    kills: 0,
+    deaths: 0,
+    rounds: 0,
+    damage: 0,
+    score: 0,
+    headshot: 0,
+    wins: 0,
+    losses: 0,
+    draws: 0,
+  };
+  for (const entry of entries) {
+    const rounds = roundsInMatch(entry);
+    totals.kills += entry.kills;
+    totals.deaths += entry.deaths;
+    totals.rounds += rounds;
+    totals.damage += entry.averageDamagePerRound * rounds;
+    totals.score += entry.averageCombatScore * rounds;
+    totals.headshot += entry.headshotPercentage;
+    if (entry.outcome === 'win') totals.wins += 1;
+    if (entry.outcome === 'loss') totals.losses += 1;
+    if (entry.outcome === 'draw') totals.draws += 1;
+  }
+
+  return {
+    matches: entries.length,
+    wins: totals.wins,
+    losses: totals.losses,
+    draws: totals.draws,
+    winRate: percentage(totals.wins, entries.length),
+    killDeathRatio: round(totals.kills / Math.max(totals.deaths, 1), 2),
+    averageDamagePerRound:
+      totals.rounds === 0 ? 0 : round(totals.damage / totals.rounds),
+    averageCombatScore:
+      totals.rounds === 0 ? 0 : round(totals.score / totals.rounds),
+    headshotPercentage:
+      entries.length === 0 ? 0 : round(totals.headshot / entries.length, 1),
+  };
+}
+
 export function buildActSummaries(
   matchLog: MatchLogEntry[],
   rating: PlayerRating | null,
@@ -93,55 +136,16 @@ export function buildActSummaries(
   }
 
   return [...groups.entries()]
-    .map(([seasonShort, entries]) => {
-      const totals = entries.reduce(
-        (sum, entry) => {
-          const rounds = roundsInMatch(entry);
-          sum.kills += entry.kills;
-          sum.deaths += entry.deaths;
-          sum.rounds += rounds;
-          sum.damage += entry.averageDamagePerRound * rounds;
-          sum.score += entry.averageCombatScore * rounds;
-          sum.headshot += entry.headshotPercentage;
-          if (entry.outcome === 'win') sum.wins += 1;
-          if (entry.outcome === 'loss') sum.losses += 1;
-          if (entry.outcome === 'draw') sum.draws += 1;
-          return sum;
-        },
-        {
-          kills: 0,
-          deaths: 0,
-          rounds: 0,
-          damage: 0,
-          score: 0,
-          headshot: 0,
-          wins: 0,
-          losses: 0,
-          draws: 0,
-        },
-      );
-
-      return {
-        latest: entries[0].startedAt,
-        summary: {
-          seasonShort,
-          matches: entries.length,
-          wins: totals.wins,
-          losses: totals.losses,
-          draws: totals.draws,
-          winRate: percentage(totals.wins, entries.length),
-          killDeathRatio: round(totals.kills / Math.max(totals.deaths, 1), 2),
-          averageDamagePerRound:
-            totals.rounds === 0 ? 0 : round(totals.damage / totals.rounds),
-          averageCombatScore:
-            totals.rounds === 0 ? 0 : round(totals.score / totals.rounds),
-          headshotPercentage: round(totals.headshot / entries.length, 1),
-          endRank:
-            rating?.seasons.find((season) => season.seasonShort === seasonShort)
-              ?.endRank ?? null,
-        } satisfies ActSummary,
-      };
-    })
+    .map(([seasonShort, entries]) => ({
+      latest: entries[0].startedAt,
+      summary: {
+        seasonShort,
+        ...summarizeMatchLog(entries),
+        endRank:
+          rating?.seasons.find((season) => season.seasonShort === seasonShort)
+            ?.endRank ?? null,
+      } satisfies ActSummary,
+    }))
     .sort((first, second) => second.latest.localeCompare(first.latest))
     .map((group) => group.summary);
 }

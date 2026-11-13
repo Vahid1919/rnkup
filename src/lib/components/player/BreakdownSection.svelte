@@ -15,11 +15,6 @@
 
   const TOP_ROWS = 5;
   // Win rates from fewer matches than this are faded; coaching ignores them.
-  const hasSmallSample = $derived(
-    [...dashboard.breakdowns.agents, ...dashboard.breakdowns.maps].some(
-      (row) => row.matches < SMALL_SAMPLE,
-    ),
-  );
   let showAllAgents = $state(false);
   let showAllMaps = $state(false);
 </script>
@@ -68,6 +63,9 @@
               <td
                 class="numeric"
                 class:small-sample={row.matches < SMALL_SAMPLE}
+                title={row.matches < SMALL_SAMPLE
+                  ? `Fewer than ${SMALL_SAMPLE} matches`
+                  : undefined}
               >
                 {Math.round(row.winRate)}%
                 {#if row.matches < SMALL_SAMPLE}
@@ -121,12 +119,6 @@
       () => (showAllMaps = !showAllMaps),
     )}
   </div>
-  {#if hasSmallSample}
-    <p class="sample-note">
-      Faded win rates come from fewer than {SMALL_SAMPLE} matches, so do not read
-      much into them.
-    </p>
-  {/if}
 </section>
 
 <style>
@@ -159,12 +151,6 @@
 
   .small-sample {
     color: var(--val-faint);
-  }
-
-  .sample-note {
-    margin: var(--space-4) 0 0;
-    color: var(--val-faint);
-    font-size: var(--text-sm);
   }
 
   .table-title {

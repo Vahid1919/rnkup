@@ -54,8 +54,14 @@
     formatSigned,
     formatTime,
     formatWeekday,
+    ordinal,
   } from '$lib/format';
-  import type { MatchLogEntry } from '$lib/dashboard';
+  import {
+    summarizeMatchLog,
+    type MatchLogEntry,
+    type MatchLogTotals,
+  } from '$lib/dashboard';
+  import { rankIconUrl } from '$lib/ranks';
   import AgentIcon from './AgentIcon.svelte';
 
   type Props = {
@@ -69,6 +75,8 @@
     key: string;
     label: string;
     entries: MatchLogEntry[];
+    /** The whole day within the filters, even when paging cuts it short. */
+    totals: MatchLogTotals;
   };
 
   const outcomeLabels: Record<MatchOutcome, string> = {
@@ -96,19 +104,46 @@
   const visible = $derived(filtered.slice(0, view.visibleCount));
   const isFiltered = $derived(activeFilterCount(view) > 0);
 
+  const totals = $derived(summarizeMatchLog(filtered));
+
   const groups = $derived.by(() => {
+    const days: Record<string, MatchLogEntry[]> = {};
+    for (const entry of filtered) {
+      (days[dayKey(entry.startedAt)] ??= []).push(entry);
+    }
+
     const result: DayGroup[] = [];
     for (const entry of visible) {
       const key = dayKey(entry.startedAt);
       let group = result.at(-1);
       if (!group || group.key !== key) {
-        group = { key, label: formatWeekday(entry.startedAt), entries: [] };
+        group = {
+          key,
+          label: formatWeekday(entry.startedAt),
+          entries: [],
+          totals: summarizeMatchLog(days[key] ?? []),
+        };
         result.push(group);
       }
       group.entries.push(entry);
     }
     return result;
   });
+
+  // Rendered once on the server and once in the browser; both agree on hours.
+  const now = Date.now();
+
+  function when(startedAt: string): string {
+    const minutes = Math.floor((now - Date.parse(startedAt)) / 60_000);
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (minutes < 24 * 60) return `${Math.floor(minutes / 60)}h ago`;
+    return formatTime(startedAt);
+  }
+
+  function placementLabel(placement: number): string {
+    return placement === 1 ? 'MVP' : ordinal(placement);
+  }
 
   function resetPaging(): void {
     view.visibleCount = PAGE_SIZE;
@@ -195,21 +230,72 @@
       </button>
     </div>
   {:else}
-    <div class="columns" aria-hidden="true">
-      <span>Match</span>
-      <span>Result</span>
-      <span class="num">K/D/A</span>
-      <span class="num">ACS</span>
-      <span class="num">RR</span>
+    <div class="overview panel">
+      <dl class="totals">
+        <div>
+          <dt>Record</dt>
+          <dd>
+            <span class="tone-good">{totals.wins}W</span>
+            <span class="tone-bad">{totals.losses}L</span>
+            {#if totals.draws > 0}<span>{totals.draws}D</span>{/if}
+          </dd>
+        </div>
+        <div>
+          <dt>Win %</dt>
+          <dd
+            class:tone-good={totals.winRate >= 50}
+            class:tone-bad={totals.winRate < 50}
+          >
+            {totals.winRate.toFixed(1)}%
+          </dd>
+        </div>
+        <div>
+          <dt>K/D</dt>
+          <dd
+            class:tone-good={totals.killDeathRatio >= 1}
+            class:tone-bad={totals.killDeathRatio < 1}
+          >
+            {totals.killDeathRatio.toFixed(2)}
+          </dd>
+        </div>
+        <div>
+          <dt><abbr title="Average damage per round">ADR</abbr></dt>
+          <dd>{totals.averageDamagePerRound}</dd>
+        </div>
+        <div>
+          <dt><abbr title="Average combat score">ACS</abbr></dt>
+          <dd>{totals.averageCombatScore}</dd>
+        </div>
+        <div>
+          <dt>HS%</dt>
+          <dd>{totals.headshotPercentage.toFixed(1)}%</dd>
+        </div>
+      </dl>
     </div>
+
     {#each groups as group (group.key)}
       <section class="day" aria-label={group.label}>
-        <h3>{group.label}</h3>
+        <header class="day-head">
+          <h3>{group.label}</h3>
+          <p>
+            {group.totals.matches}
+            {group.totals.matches === 1 ? 'match' : 'matches'}
+            <span aria-hidden="true">·</span>
+            <span class="tone-good">{group.totals.wins}W</span>
+            <span class="tone-bad">{group.totals.losses}L</span>
+            {#if group.totals.draws > 0}{group.totals.draws}D{/if}
+            <span aria-hidden="true">·</span>
+            K/D {group.totals.killDeathRatio.toFixed(2)}
+            <span aria-hidden="true">·</span>
+            ACS {group.totals.averageCombatScore}
+          </p>
+        </header>
         <ol>
           {#each group.entries as entry (entry.id)}
+            {@const rankIcon = entry.rank ? rankIconUrl(entry.rank.id) : null}
             <li id="match-{entry.id}">
               <a
-                class="match"
+                class="match {entry.outcome}"
                 href={resolve('/players/[name]/[tag]/matches/[matchId]', {
                   name,
                   tag,
@@ -221,56 +307,123 @@
                   <AgentIcon
                     agentId={entry.agentId}
                     agentName={entry.agentName}
-                    size="sm"
                   />
                   <span class="where">
-                    <strong>{entry.mapName}</strong>
-                    <span>
-                      {entry.agentName} · {formatTime(entry.startedAt)}
+                    <span class="meta">
+                      {when(entry.startedAt)} · {entry.agentName}
                     </span>
+                    <strong>{entry.mapName}</strong>
                   </span>
                 </span>
 
                 <span class="result">
-                  <span class="outcome {entry.outcome}">
-                    {outcomeLabels[entry.outcome]}
-                  </span>
-                  <span class="score">
-                    {entry.score.won}–{entry.score.lost}
+                  {#if rankIcon && entry.rank}
+                    <img
+                      class="rank"
+                      src={rankIcon}
+                      alt={entry.rank.name}
+                      title={entry.rank.name}
+                      loading="lazy"
+                      width="32"
+                      height="32"
+                    />
+                  {/if}
+                  <span class="score-block">
+                    <span class="score">
+                      <span class="ours">{entry.score.won}</span>
+                      <span class="sep" aria-hidden="true">:</span>
+                      <span class="sr-only">to</span>
+                      <span class="theirs">{entry.score.lost}</span>
+                    </span>
+                    <span class="outcome-line">
+                      <span class="outcome">{outcomeLabels[entry.outcome]}</span
+                      >
+                      {#if entry.placement !== null}
+                        <span
+                          class="placement"
+                          class:mvp={entry.placement === 1}
+                          title="{ordinal(entry.placement)} by combat score"
+                        >
+                          {placementLabel(entry.placement)}
+                        </span>
+                      {/if}
+                    </span>
                   </span>
                 </span>
 
                 <span class="stats">
-                  <span class="cell num">
-                    <span class="cell-label">K/D/A</span>
-                    {entry.kills} / {entry.deaths} / {entry.assists}
+                  <span class="cell key">
+                    <span
+                      class="value"
+                      class:tone-good={entry.killDeathRatio >= 1}
+                      class:tone-bad={entry.killDeathRatio < 1}
+                    >
+                      {entry.killDeathRatio.toFixed(2)}
+                    </span>
+                    <span class="cell-label">K/D</span>
                   </span>
-                  <span class="cell num">
-                    <span class="cell-label">ACS</span>
-                    {entry.averageCombatScore}
+                  <span class="cell">
+                    <span class="value">
+                      {entry.kills}<span class="slash">/</span
+                      >{entry.deaths}<span class="slash">/</span>{entry.assists}
+                    </span>
+                    <span class="cell-label">K/D/A</span>
                   </span>
                   <span
-                    class="cell num"
+                    class="cell wide"
+                    class:no-value={entry.damageDeltaPerRound === null}
+                  >
+                    <span
+                      class="value"
+                      class:tone-good={(entry.damageDeltaPerRound ?? 0) > 0}
+                      class:tone-bad={(entry.damageDeltaPerRound ?? 0) < 0}
+                    >
+                      {entry.damageDeltaPerRound === null
+                        ? '—'
+                        : formatSigned(entry.damageDeltaPerRound)}
+                    </span>
+                    <span class="cell-label"
+                      ><abbr title="Damage dealt minus taken, per round"
+                        >DDΔ</abbr
+                      ></span
+                    >
+                  </span>
+                  <span class="cell wide">
+                    <span class="value"
+                      >{Math.round(entry.headshotPercentage)}%</span
+                    >
+                    <span class="cell-label">HS%</span>
+                  </span>
+                  <span class="cell wide">
+                    <span class="value">{entry.averageCombatScore}</span>
+                    <span class="cell-label">ACS</span>
+                  </span>
+                  <span
+                    class="cell"
                     class:no-value={entry.ratingChange === null}
                   >
                     {#if entry.ratingChange !== null}
-                      <span class="cell-label">RR</span>
                       <span
+                        class="value"
                         class:tone-good={entry.ratingChange > 0}
                         class:tone-bad={entry.ratingChange < 0}
                       >
                         {formatSigned(entry.ratingChange)}
                       </span>
                     {:else}
-                      <span class="no-rr" aria-hidden="true">—</span>
+                      <span class="value no-rr" aria-hidden="true">—</span>
                       <span class="sr-only">No RR change recorded</span>
                     {/if}
+                    <span class="cell-label">RR</span>
                   </span>
                 </span>
 
                 <span class="sr-only">
                   {formatSeason(entry.seasonShort)}. Open match details.
                 </span>
+                <svg class="open" viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M6 3.5 10.5 8 6 12.5" />
+                </svg>
               </a>
             </li>
           {/each}
@@ -364,67 +517,128 @@
     margin: 0;
   }
 
-  /* Shared column template for the header row and every match row. */
-  .columns,
-  .match {
-    display: grid;
-    grid-template-columns:
-      minmax(0, 2fr) minmax(7.5rem, 1fr) minmax(7.5rem, 1fr)
-      4rem 4rem;
-    align-items: center;
-    gap: var(--space-4);
-    padding-inline: var(--space-3);
+  /* Totals for whatever the filters leave. */
+  .overview {
+    margin-bottom: var(--space-2);
+    padding: var(--space-4) var(--space-5);
   }
 
-  .columns {
-    padding-bottom: var(--space-2);
-    border-bottom: 1px solid var(--val-line);
+  .totals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3) var(--space-6);
+    margin: 0;
+  }
+
+  .totals dt {
     color: var(--val-faint);
     font-size: var(--text-xs);
-    font-weight: 500;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
 
-  .stats {
-    display: contents;
-  }
-
-  .num {
-    text-align: right;
+  .totals dd {
+    display: flex;
+    gap: var(--space-2);
+    margin: var(--space-1) 0 0;
+    color: var(--val-cream);
+    font-family: var(--font-display);
+    font-size: 1.375rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
   }
 
   .day {
     margin-top: var(--space-5);
   }
 
+  .day-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-1) var(--space-4);
+    margin-bottom: var(--space-2);
+    padding-inline: var(--space-1);
+  }
+
   h3 {
-    margin: 0 0 var(--space-1);
-    padding-inline: var(--space-3);
-    color: var(--val-muted);
+    margin: 0;
+    color: var(--val-cream);
     font-size: var(--text-sm);
     font-weight: 600;
   }
 
+  .day-head p {
+    margin: 0;
+    color: var(--val-muted);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
   ol {
+    display: grid;
+    gap: 4px;
     margin: 0;
     padding: 0;
     list-style: none;
   }
 
-  li + li {
-    border-top: 1px solid var(--val-line);
-  }
-
+  /* Each match is a card: the edge and a faint wash say the result first. */
   .match {
-    min-height: 3.5rem;
+    --tone: var(--val-draw);
+
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(8.5rem, 1fr) auto auto;
+    align-items: center;
+    gap: var(--space-4);
+    min-height: 4.25rem;
+    border-left: 3px solid var(--tone);
     border-radius: var(--radius);
-    padding-block: var(--space-2);
+    padding: var(--space-2) var(--space-4) var(--space-2) var(--space-3);
     color: var(--val-cream);
+    background:
+      linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--tone) 14%, transparent),
+        transparent 45%
+      ),
+      var(--val-panel);
     text-decoration: none;
     transition: background-color 150ms ease;
   }
 
+  .match.win {
+    --tone: var(--val-win);
+  }
+
+  .match.loss {
+    --tone: var(--val-red);
+  }
+
   .match:hover {
-    background: var(--val-panel);
+    background-color: var(--val-panel-raised);
+  }
+
+  /* A chevron says the row opens; it nudges forward on hover. */
+  .open {
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: var(--val-faint);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.75;
+    transition:
+      stroke 150ms ease,
+      transform 150ms ease;
+  }
+
+  .match:hover .open,
+  .match:focus-visible .open {
+    stroke: var(--val-cream);
+    transform: translateX(3px);
   }
 
   .identity {
@@ -437,67 +651,128 @@
   .where {
     display: grid;
     min-width: 0;
-    line-height: 1.3;
+    line-height: 1.25;
   }
 
   .where strong {
-    font-weight: 600;
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 500;
   }
 
-  .where span {
+  .meta {
     overflow: hidden;
     color: var(--val-faint);
-    font-size: var(--text-sm);
+    font-size: var(--text-xs);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .result {
     display: flex;
-    align-items: baseline;
-    gap: var(--space-2);
-    font-variant-numeric: tabular-nums;
+    align-items: center;
+    gap: var(--space-3);
   }
 
-  .outcome {
-    min-width: 2.25rem;
-    font-weight: 600;
+  .rank {
+    width: 2rem;
+    height: 2rem;
+    flex-shrink: 0;
   }
 
-  .outcome.win {
-    color: var(--val-win);
-  }
-
-  .outcome.loss {
-    color: var(--val-loss);
-  }
-
-  .outcome.draw {
-    color: var(--val-draw);
+  .score-block {
+    display: grid;
+    gap: 2px;
   }
 
   .score {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+
+  .score .ours {
+    color: var(--tone);
+  }
+
+  .score .sep,
+  .score .theirs {
     color: var(--val-muted);
   }
 
+  .outcome-line {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .outcome {
+    color: var(--tone);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .placement {
+    border-radius: 3px;
+    padding: 0 0.3rem;
+    color: var(--val-muted);
+    background: var(--val-panel-raised);
+    font-size: 0.6875rem;
+    font-weight: 700;
+  }
+
+  .placement.mvp {
+    color: var(--val-bg);
+    background: var(--val-gold);
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: 3.5rem 6rem 3.5rem 3.5rem 3.5rem 3rem;
+    gap: var(--space-4);
+  }
+
   .cell {
+    display: grid;
+    justify-items: end;
+    gap: 2px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
 
-  /* Holds the RR column on wide screens without competing with real values. */
+  .value {
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+
+  .key .value {
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 500;
+    line-height: 1.1;
+  }
+
+  .slash {
+    margin-inline: 0.15em;
+    color: var(--val-faint);
+    font-weight: 400;
+  }
+
+  .cell-label {
+    color: var(--val-faint);
+    font-size: 0.6875rem;
+    font-weight: 500;
+  }
+
   .no-rr {
     color: var(--val-line-strong);
   }
 
-  /* Column headers label the cells on wide screens; inline labels take over on phones. */
-  .cell-label {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
+  .cell.no-value .value:not(.no-rr) {
+    color: var(--val-line-strong);
   }
 
   .show-more {
@@ -523,17 +798,23 @@
     font-weight: 400;
   }
 
-  @media (max-width: 680px) {
-    .columns {
-      display: none;
+  @media (max-width: 920px) {
+    .stats {
+      grid-template-columns: 3.5rem 6rem 3rem;
     }
 
+    .cell.wide {
+      display: none;
+    }
+  }
+
+  @media (max-width: 680px) {
     .match {
       grid-template-columns: minmax(0, 1fr) auto;
       grid-template-areas:
         'identity result'
         'stats stats';
-      gap: var(--space-1) var(--space-3);
+      gap: var(--space-2) var(--space-3);
       padding-block: var(--space-3);
     }
 
@@ -541,35 +822,43 @@
       grid-area: identity;
     }
 
+    .open {
+      display: none;
+    }
+
     .result {
       grid-area: result;
+    }
+
+    .rank {
+      display: none;
+    }
+
+    .score-block {
+      justify-items: end;
     }
 
     .stats {
       display: flex;
       grid-area: stats;
-      flex-wrap: wrap;
-      gap: var(--space-1) var(--space-4);
-      padding-left: calc(2rem + var(--space-3));
-      color: var(--val-muted);
-      font-size: var(--text-sm);
+      gap: var(--space-5);
+      padding-left: calc(2.5rem + var(--space-3));
     }
 
     .cell {
-      text-align: left;
+      justify-items: start;
     }
 
     .cell.no-value {
       display: none;
     }
 
-    .cell-label {
-      position: static;
-      width: auto;
-      height: auto;
-      margin-right: var(--space-1);
-      clip-path: none;
-      color: var(--val-faint);
+    .overview {
+      padding: var(--space-4);
+    }
+
+    .totals {
+      gap: var(--space-3) var(--space-4);
     }
 
     label {

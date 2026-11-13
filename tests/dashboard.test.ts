@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  activityLegend,
+  activityLevel,
+  ACTIVITY_WEEKS,
   availableRatingRanges,
+  buildActivity,
   buildCompetitivePerformance,
   buildMatchTakeaways,
   ratingChange,
   ratingPointsInRange,
   STAT_DEFINITIONS,
+  summarizeMatchLog,
   type CompetitiveMatchInput,
+  type MatchLogEntry,
   type RatingPoint,
 } from '../src/lib/dashboard';
 import { lobbyGap } from '../src/lib/format';
@@ -344,16 +350,21 @@ describe('rating ranges', () => {
   ];
 
   it('counts a window back from the latest game, not from today', () => {
-    expect(ratingPointsInRange(history, 3).map((entry) => entry.date)).toEqual([
+    expect(
+      ratingPointsInRange(history, { months: 3 }).map((entry) => entry.date),
+    ).toEqual([
       '2026-08-20T20:00:00Z',
       '2026-10-01T20:00:00Z',
       '2026-11-03T20:00:00Z',
     ]);
+    expect(ratingPointsInRange(history, { days: 7 })).toHaveLength(1);
     expect(ratingPointsInRange(history, null)).toHaveLength(5);
   });
 
   it('offers only ranges shorter than the history, plus all', () => {
     expect(availableRatingRanges(history).map((range) => range.id)).toEqual([
+      '1w',
+      '2w',
       '1m',
       '3m',
       '6m',
@@ -361,10 +372,183 @@ describe('rating ranges', () => {
     ]);
     expect(
       availableRatingRanges(history.slice(3)).map((range) => range.id),
-    ).toEqual(['1m', 'all']);
+    ).toEqual(['1w', '2w', '1m', 'all']);
   });
 
   it('sums the RR change across the shown games', () => {
-    expect(ratingChange(ratingPointsInRange(history, 3))).toBe(27);
+    expect(ratingChange(ratingPointsInRange(history, { months: 3 }))).toBe(27);
+  });
+});
+
+function logEntry(overrides: Partial<MatchLogEntry>): MatchLogEntry {
+  return {
+    id: 'entry',
+    startedAt: '2026-11-12T10:00:00Z',
+    mapName: 'Ascent',
+    agentName: 'Jett',
+    agentId: null,
+    seasonShort: 'e11a6',
+    rank: null,
+    outcome: 'win',
+    score: { won: 13, lost: 7 },
+    kills: 20,
+    deaths: 10,
+    assists: 5,
+    averageCombatScore: 250,
+    averageDamagePerRound: 150,
+    damageDeltaPerRound: null,
+    headshotPercentage: 25,
+    killDeathRatio: 2,
+    kast: null,
+    placement: null,
+    firstBloods: null,
+    firstDeaths: null,
+    ratingChange: null,
+    detailed: false,
+    ...overrides,
+  };
+}
+
+/** A timestamp on a local calendar day, so tests hold in any time zone. */
+function onDay(today: Date, daysAgo: number, hour = 20): string {
+  return new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate() - daysAgo,
+    hour,
+  ).toISOString();
+}
+
+describe('activity calendar', () => {
+  // A Wednesday: the current week column has Thursday to Saturday still ahead.
+  const today = new Date(2026, 10, 11, 22);
+
+  it('lays out whole weeks from Sunday, ending with the current week', () => {
+    const report = buildActivity(
+      [logEntry({ startedAt: onDay(today, 200) })],
+      today,
+    );
+    const firstDay = report.weeks[0][0].date.split('-').map(Number);
+
+    expect(report.weeks).toHaveLength(ACTIVITY_WEEKS);
+    expect(new Date(firstDay[0], firstDay[1] - 1, firstDay[2]).getDay()).toBe(
+      0,
+    );
+    expect(report.weeks.at(-1)?.map((day) => day.inRange)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect(report.weeks.at(-1)?.map((day) => day.future)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+    ]);
+    expect(report.dayCount).toBe((ACTIVITY_WEEKS - 1) * 7 + 4);
+    expect(report.activeDays).toBe(0);
+  });
+
+  it('leaves days before the oldest stored match out of the count', () => {
+    const report = buildActivity(
+      [logEntry({ startedAt: onDay(today, 3) })],
+      today,
+    );
+
+    expect(report.dayCount).toBe(4);
+    expect(report.weeks[0][0].inRange).toBe(false);
+  });
+
+  it('counts active days and shades the busiest day darkest', () => {
+    const report = buildActivity(
+      [
+        logEntry({ id: 'a', startedAt: onDay(today, 0) }),
+        logEntry({ id: 'b', startedAt: onDay(today, 1), outcome: 'loss' }),
+        logEntry({ id: 'c', startedAt: onDay(today, 1, 9) }),
+        logEntry({ id: 'd', startedAt: onDay(today, 2) }),
+        logEntry({ id: 'e', startedAt: onDay(today, 5) }),
+        logEntry({ id: 'old', startedAt: onDay(today, 200) }),
+      ],
+      today,
+    );
+    const yesterday = report.weeks.flat().find((day) => day.matches === 2);
+
+    expect(report.activeDays).toBe(4);
+    expect(report.busiestDay).toBe(2);
+    expect(yesterday).toMatchObject({ wins: 1, losses: 1 });
+    expect(
+      yesterday && activityLevel(yesterday, 'playtime', report.busiestDay),
+    ).toBe(4);
+    expect(activityLegend('playtime', 8)).toEqual(['0', '2', '4', '6', '8']);
+  });
+
+  it('shades a day by its K/D or win rate once it has matches', () => {
+    const report = buildActivity(
+      [
+        logEntry({
+          id: 'a',
+          startedAt: onDay(today, 1),
+          kills: 20,
+          deaths: 10,
+        }),
+        logEntry({
+          id: 'b',
+          startedAt: onDay(today, 1, 9),
+          outcome: 'loss',
+          kills: 4,
+          deaths: 16,
+        }),
+      ],
+      today,
+    );
+    const days = report.weeks.flat();
+    const played = days.find((day) => day.matches === 2);
+    const idle = days.find((day) => day.inRange && day.matches === 0);
+
+    // 24 kills over 26 deaths is 0.92 K/D, and one win in two is 50%.
+    expect(played && activityLevel(played, 'killDeath', 2)).toBe(2);
+    expect(played && activityLevel(played, 'winRate', 2)).toBe(3);
+    expect(idle && activityLevel(idle, 'killDeath', 2)).toBe(0);
+    expect(activityLegend('killDeath', 2)).toEqual([
+      '–',
+      '<0.8',
+      '0.8',
+      '1.0',
+      '1.2+',
+    ]);
+  });
+});
+
+describe('match log totals', () => {
+  const entries = [
+    logEntry({ id: 'a', agentName: 'Sova' }),
+    logEntry({
+      id: 'b',
+      agentName: 'Sova',
+      outcome: 'loss',
+      score: { won: 7, lost: 13 },
+      kills: 10,
+      deaths: 20,
+      averageCombatScore: 150,
+    }),
+    logEntry({ id: 'c', agentName: 'Jett' }),
+  ];
+
+  it('weights per-round averages by rounds played', () => {
+    expect(summarizeMatchLog(entries)).toMatchObject({
+      matches: 3,
+      wins: 2,
+      losses: 1,
+      winRate: 66.7,
+      killDeathRatio: 1.25,
+      averageCombatScore: 217,
+    });
   });
 });

@@ -1,4 +1,4 @@
-<!-- Stand-in for the stats overview and rank chart while match history streams in.
+<!-- Stand-in for the stats overview, coaching and rank chart while match history streams in.
      It copies their layout, so the page doesn't jump when the numbers arrive. -->
 <script lang="ts">
   // What the server does, in order. The lines follow the work rather than
@@ -86,11 +86,15 @@
     </div>
   </div>
 
-  <!-- The note under the overview, so the chart below starts where it will. -->
-  <div class="hint" aria-hidden="true">
-    <span class="bone" style:--w="100%" style:--h="0.6rem"></span>
-    <span class="bone" style:--w="94%" style:--h="0.6rem"></span>
-    <span class="bone" style:--w="38%" style:--h="0.6rem"></span>
+  <!-- Coaching follows the overview: its title, then the lead note. -->
+  <div class="coaching-title" aria-hidden="true">
+    <span class="bone" style:--w="8rem" style:--h="1.8rem"></span>
+  </div>
+  <div class="coaching panel" aria-hidden="true">
+    <span class="bone" style:--w="5rem" style:--h="0.7rem"></span>
+    <span class="bone" style:--w="55%" style:--h="1.75rem"></span>
+    <span class="bone" style:--w="80%" style:--h="0.85rem"></span>
+    <span class="bone" style:--w="65%" style:--h="0.85rem"></span>
   </div>
 
   <div class="trends panel" aria-hidden="true">
@@ -148,7 +152,7 @@
     animation: enter 350ms ease-out backwards;
   }
 
-  /* A band of light crossing the whole panel. Both panels are the same width,
+  /* A band of light crossing the whole panel. Every panel is the same width,
      so it reads as one sweep down the page. Moved with a transform, which the
      browser can animate without repainting the blocks underneath. */
   .panel::after {
@@ -284,17 +288,20 @@
     padding-left: var(--space-4);
   }
 
-  /* Three lines of small text: each block sits in a line-high row. */
-  .hint {
+  .coaching-title {
+    margin: var(--space-8) 0 var(--space-5);
+  }
+
+  .coaching {
     display: grid;
-    grid-auto-rows: 1.3125rem;
-    align-items: center;
-    max-width: 48rem;
-    margin-top: var(--space-3);
+    gap: var(--space-3);
+    border-top: 2px solid var(--val-line-strong);
+    padding: var(--space-6);
+    animation-delay: 60ms;
   }
 
   .trends {
-    margin-top: var(--space-5);
+    margin-top: var(--space-8);
     padding: var(--space-5);
     animation-delay: 90ms;
   }
@@ -411,6 +418,7 @@
 
   @media (max-width: 560px) {
     .overview,
+    .coaching,
     .trends {
       padding: var(--space-4);
     }

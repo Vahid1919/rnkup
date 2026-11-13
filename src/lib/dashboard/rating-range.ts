@@ -6,7 +6,10 @@
 
 import type { RatingPoint } from './types';
 
-export type RatingRange = '1m' | '3m' | '6m' | '1y' | 'all';
+export type RatingRange = '1w' | '2w' | '1m' | '3m' | '6m' | '1y' | 'all';
+
+/** A window length in calendar days or calendar months. */
+export type RatingWindow = { days: number } | { months: number };
 
 export type RatingRangeOption = {
   id: RatingRange;
@@ -15,35 +18,38 @@ export type RatingRangeOption = {
   /** Spoken and tooltip label, e.g. "3 months". */
   title: string;
   /** Length of the window, or null for the whole history. */
-  months: number | null;
+  window: RatingWindow | null;
 };
 
 export const RATING_RANGES: RatingRangeOption[] = [
-  { id: '1m', label: '1M', title: '1 month', months: 1 },
-  { id: '3m', label: '3M', title: '3 months', months: 3 },
-  { id: '6m', label: '6M', title: '6 months', months: 6 },
-  { id: '1y', label: '1Y', title: '1 year', months: 12 },
-  { id: 'all', label: 'All', title: 'All time', months: null },
+  { id: '1w', label: '1W', title: '1 week', window: { days: 7 } },
+  { id: '2w', label: '2W', title: '2 weeks', window: { days: 14 } },
+  { id: '1m', label: '1M', title: '1 month', window: { months: 1 } },
+  { id: '3m', label: '3M', title: '3 months', window: { months: 3 } },
+  { id: '6m', label: '6M', title: '6 months', window: { months: 6 } },
+  { id: '1y', label: '1Y', title: '1 year', window: { months: 12 } },
+  { id: 'all', label: 'All', title: 'All time', window: null },
 ];
 
 export const DEFAULT_RATING_RANGE: RatingRange = '3m';
 
-/** The start of a window that ends at `end` and lasts `months`. */
-function windowStart(end: string, months: number): number {
+/** The start of a window that ends at `end`. */
+function windowStart(end: string, window: RatingWindow): number {
   const start = new Date(end);
-  start.setUTCMonth(start.getUTCMonth() - months);
+  if ('days' in window) start.setUTCDate(start.getUTCDate() - window.days);
+  else start.setUTCMonth(start.getUTCMonth() - window.months);
   return start.getTime();
 }
 
-/** Rating points from the last `months` before the latest point, oldest first. */
+/** Rating points inside the window before the latest point, oldest first. */
 export function ratingPointsInRange(
   history: RatingPoint[],
-  months: number | null,
+  window: RatingWindow | null,
 ): RatingPoint[] {
   const latest = history.at(-1);
-  if (months === null || !latest) return history;
+  if (window === null || !latest) return history;
 
-  const start = windowStart(latest.date, months);
+  const start = windowStart(latest.date, window);
   return history.filter((point) => new Date(point.date).getTime() >= start);
 }
 
@@ -57,13 +63,13 @@ export function availableRatingRanges(
 ): RatingRangeOption[] {
   const first = history.at(0);
   const latest = history.at(-1);
-  if (!first || !latest) return RATING_RANGES.filter((range) => !range.months);
+  if (!first || !latest) return RATING_RANGES.filter((range) => !range.window);
 
   const firstTime = new Date(first.date).getTime();
   return RATING_RANGES.filter(
     (range) =>
-      range.months === null ||
-      windowStart(latest.date, range.months) > firstTime,
+      range.window === null ||
+      windowStart(latest.date, range.window) > firstTime,
   );
 }
 

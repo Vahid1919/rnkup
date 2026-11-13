@@ -22,20 +22,15 @@
 
   const matchSections = [
     {
-      route: '/players/[name]/[tag]/matches/[matchId]#summary',
-      hash: '#summary',
-      label: 'Your game',
-    },
-    {
-      route: '/players/[name]/[tag]/matches/[matchId]#scoreboard',
-      hash: '#scoreboard',
-      label: 'Scoreboard',
-    },
-    {
       route: '/players/[name]/[tag]/matches/[matchId]#rounds',
       hash: '#rounds',
       label: 'Rounds',
       needs: 'rounds',
+    },
+    {
+      route: '/players/[name]/[tag]/matches/[matchId]#summary',
+      hash: '#summary',
+      label: 'Your game',
     },
     {
       route: '/players/[name]/[tag]/matches/[matchId]#map',
@@ -44,10 +39,9 @@
       needs: 'map',
     },
     {
-      route: '/players/[name]/[tag]/matches/[matchId]#economy',
-      hash: '#economy',
-      label: 'Economy',
-      needs: 'rounds',
+      route: '/players/[name]/[tag]/matches/[matchId]#scoreboard',
+      hash: '#scoreboard',
+      label: 'Scoreboard',
     },
     {
       route: '/players/[name]/[tag]/matches/[matchId]#duels',
