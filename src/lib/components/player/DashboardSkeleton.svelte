@@ -9,7 +9,7 @@
     'Comparing you with the other nine in each lobby',
     "Working out what's costing you rounds",
   ];
-  const STEP_MS = 1600;
+  const STEP_MS = 3000;
 
   let step = $state(0);
 
@@ -22,17 +22,13 @@
 </script>
 
 <section class="loading" role="status" aria-labelledby="loading-title">
-  <div class="heading">
-    <h2 id="loading-title">
-      Loading match history<span class="dots" aria-hidden="true"></span>
-    </h2>
-    <!-- Decorative: the heading is what screen readers announce. -->
-    <p class="step" aria-hidden="true">
-      {#key step}
-        <span>{steps[step]}</span>
-      {/key}
-    </p>
-  </div>
+  <!-- Screen readers get one steady label; the changing line is for the eye. -->
+  <h2 id="loading-title" class="sr-only">Loading match history</h2>
+  <p class="step" aria-hidden="true">
+    {#key step}
+      <span>{steps[step]}</span>
+    {/key}
+  </p>
 
   <div class="overview panel" aria-hidden="true">
     <div class="top-row">
@@ -125,47 +121,25 @@
     margin-top: var(--space-7);
   }
 
-  /* Same shape as the "Competitive overview" heading it stands in for. */
-  .heading {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0 var(--space-4);
-  }
-
-  h2 {
-    margin: 0 0 var(--space-3);
-    color: var(--val-cream);
-    font-family: var(--font-display);
-    font-size: var(--text-xl);
-    font-weight: 500;
-    letter-spacing: 0.04em;
-    line-height: 1.2;
-    text-transform: uppercase;
-  }
-
-  /* A fixed width, so the line beside the heading doesn't shift as the dots
-     count up. */
-  .dots {
-    display: inline-block;
-    width: 1.25em;
-  }
-
-  .dots::after {
-    content: '';
-    animation: dots 1.4s steps(1) infinite;
-  }
-
+  /* The same height as the "Competitive overview" heading it stands in for. */
   .step {
     margin: 0 0 var(--space-3);
     color: var(--val-muted);
-    font-size: var(--text-sm);
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
     font-weight: 500;
+    letter-spacing: 0.01em;
+    line-height: 1.25;
   }
 
   .step span {
     display: inline-block;
     animation: step-in 300ms ease-out;
+  }
+
+  .step span::after {
+    content: '';
+    animation: dots 1.4s steps(1) infinite;
   }
 
   .panel {
