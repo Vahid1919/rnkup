@@ -25,7 +25,6 @@ pnpm-debug.log
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
-!.vscode/mcp.json
 .history/*
 
 # Test output
@@ -37,6 +36,21 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Local tooling
+.claude/
+CLAUDE.md
+AGENTS.md
+.github/hooks/
+.github/skills/
+.github/copilot-instructions.md
+.cursor/
+.cursorrules
+.windsurfrules
+.codex/
+.gemini/
+.mcp.json
+.vscode/mcp.json
 
 # System files
 .DS_Store
